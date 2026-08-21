@@ -541,6 +541,20 @@ export const SourceControlWritingStyleMode = Schema.Literals([
 ]);
 export type SourceControlWritingStyleMode = typeof SourceControlWritingStyleMode.Type;
 
+/**
+ * Automatic context recycling: when a thread's context usage crosses the
+ * threshold, the server asks the agent for a handoff and restarts the
+ * conversation fresh from it. Exists because provider-side auto-compaction
+ * is unreliable for routed models.
+ */
+export const ContextRecycleSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  thresholdPct: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })).pipe(
+    Schema.withDecodingDefault(Effect.succeed(75)),
+  ),
+});
+export type ContextRecycleSettings = typeof ContextRecycleSettings.Type;
+
 export const SourceControlWritingStyleSettings = Schema.Struct({
   mode: SourceControlWritingStyleMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("repo_conventions" as const)),
@@ -654,6 +668,7 @@ export const ServerSettings = Schema.Struct({
   sourceControlWritingStyle: SourceControlWritingStyleSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
+  contextRecycle: ContextRecycleSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   sourceControlWriterModelSelection: Schema.NullOr(ModelSelection).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
@@ -846,6 +861,12 @@ export const ServerSettingsPatch = Schema.Struct({
     }),
   ),
   sourceControlWriterModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  contextRecycle: Schema.optionalKey(
+    Schema.Struct({
+      enabled: Schema.optionalKey(Schema.Boolean),
+      thresholdPct: Schema.optionalKey(Schema.Int),
+    }),
+  ),
   observability: Schema.optionalKey(
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(TrimmedString),

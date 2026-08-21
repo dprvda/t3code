@@ -51,6 +51,8 @@ import {
   ClaudeSeatRotationReactorLive,
 } from "../src/orchestration/Layers/ClaudeSeatRotationReactor.ts";
 import { ClaudeSeatRotationReactor } from "../src/orchestration/Services/ClaudeSeatRotationReactor.ts";
+import { ContextRecycleReactorLive } from "../src/orchestration/Layers/ContextRecycleReactor.ts";
+import { ContextRecycleReactor } from "../src/orchestration/Services/ContextRecycleReactor.ts";
 import * as RepositoryIdentityResolver from "../src/project/RepositoryIdentityResolver.ts";
 import { OrchestrationEngineLive } from "../src/orchestration/Layers/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "../src/orchestration/Layers/ProjectionPipeline.ts";
@@ -230,6 +232,7 @@ export interface OrchestrationIntegrationHarness {
   readonly drainProviderRuntime: Effect.Effect<void>;
   readonly drainCheckpointReactor: Effect.Effect<void>;
   readonly drainClaudeSeatRotation: Effect.Effect<void>;
+  readonly drainContextRecycle: Effect.Effect<void>;
   readonly dispose: Effect.Effect<void, never>;
 }
 
@@ -384,11 +387,18 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(serverSettingsLayer),
       Layer.provideMerge(VcsProcess.layer),
     );
+    const contextRecycleReactorLayer = ContextRecycleReactorLive.pipe(
+      Layer.provide(providerSessionDirectoryLayer),
+      Layer.provideMerge(runtimeServicesLayer),
+      Layer.provideMerge(serverSettingsLayer),
+      Layer.provideMerge(VcsProcess.layer),
+    );
     const orchestrationReactorLayer = OrchestrationReactorLive.pipe(
       Layer.provideMerge(runtimeIngestionLayer),
       Layer.provideMerge(providerCommandReactorLayer),
       Layer.provideMerge(checkpointReactorLayer),
       Layer.provideMerge(claudeSeatRotationReactorLayer),
+      Layer.provideMerge(contextRecycleReactorLayer),
       Layer.provideMerge(
         Layer.succeed(ThreadDeletionReactor, {
           start: () => Effect.void,
@@ -430,6 +440,10 @@ export const makeOrchestrationIntegrationHarness = (
     const claudeSeatRotationReactor = yield* tryRuntimePromise(
       "load ClaudeSeatRotationReactor service",
       () => runtime.runPromise(Effect.service(ClaudeSeatRotationReactor)),
+    ).pipe(Effect.orDie);
+    const contextRecycleReactor = yield* tryRuntimePromise(
+      "load ContextRecycleReactor service",
+      () => runtime.runPromise(Effect.service(ContextRecycleReactor)),
     ).pipe(Effect.orDie);
     const snapshotQuery = yield* tryRuntimePromise("load ProjectionSnapshotQuery service", () =>
       runtime.runPromise(Effect.service(ProjectionSnapshotQuery)),
@@ -598,6 +612,7 @@ export const makeOrchestrationIntegrationHarness = (
       drainProviderRuntime: providerRuntimeIngestion.drain,
       drainCheckpointReactor: checkpointReactor.drain,
       drainClaudeSeatRotation: claudeSeatRotationReactor.drain,
+      drainContextRecycle: contextRecycleReactor.drain,
       dispose,
     } satisfies OrchestrationIntegrationHarness;
   });

@@ -62,6 +62,7 @@ import {
   ClaudeSeatLimits,
   ClaudeSeatRotationReactorLive,
 } from "./orchestration/Layers/ClaudeSeatRotationReactor.ts";
+import { ContextRecycleReactorLive } from "./orchestration/Layers/ContextRecycleReactor.ts";
 import { ThreadDeletionReactorLive } from "./orchestration/Layers/ThreadDeletionReactor.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
@@ -243,6 +244,10 @@ const PlatformServicesLive = Layer.unwrap(
   }),
 );
 
+const ProviderSessionDirectoryLayerLive = ProviderSessionDirectoryLive.pipe(
+  Layer.provide(ProviderSessionRuntime.layer),
+);
+
 const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(OrchestrationReactorLive),
   Layer.provideMerge(ProviderRuntimeIngestionLive),
@@ -250,12 +255,11 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(CheckpointReactorLive),
   Layer.provideMerge(ThreadDeletionReactorLive),
   Layer.provideMerge(ClaudeSeatRotationReactorLive.pipe(Layer.provide(ClaudeSeatLimits.layer))),
+  Layer.provideMerge(
+    ContextRecycleReactorLive.pipe(Layer.provide(ProviderSessionDirectoryLayerLive)),
+  ),
   Layer.provideMerge(AgentAwarenessRelay.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provideMerge(RuntimeReceiptBusLive),
-);
-
-const ProviderSessionDirectoryLayerLive = ProviderSessionDirectoryLive.pipe(
-  Layer.provide(ProviderSessionRuntime.layer),
 );
 
 // `ProviderAdapterRegistryLive` is now a facade that resolves kind → adapter
