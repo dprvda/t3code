@@ -32,7 +32,9 @@ it.layer(NodeServices.layer)("ClaudeHome", (it) => {
 
         expect(yield* resolveClaudeHomePath({ homePath })).toBe(resolved);
         expect((yield* makeClaudeEnvironment({ homePath })).CLAUDE_CONFIG_DIR).toBe(resolved);
-        expect(yield* makeClaudeContinuationGroupKey({ homePath })).toBe(`claude:home:${resolved}`);
+        expect(yield* makeClaudeContinuationGroupKey({ homePath, continuationGroup: "" })).toBe(
+          `claude:home:${resolved}`,
+        );
         expect(yield* makeClaudeCapabilitiesCacheKey({ binaryPath: "claude", homePath })).toBe(
           `claude\0${resolved}\0`,
         );
@@ -53,9 +55,33 @@ it.layer(NodeServices.layer)("ClaudeHome", (it) => {
         const path = yield* Path.Path;
         const resolved = path.resolve(NodeOS.homedir());
 
-        expect(yield* makeClaudeContinuationGroupKey({ homePath: "" })).toBe(
+        expect(yield* makeClaudeContinuationGroupKey({ homePath: "", continuationGroup: "" })).toBe(
           `claude:home:${resolved}`,
         );
+      }),
+    );
+
+    it.effect("an explicit continuation group overrides the home-path identity", () =>
+      Effect.gen(function* () {
+        const grouped = yield* makeClaudeContinuationGroupKey({
+          homePath: "~/.claude-acct2",
+          continuationGroup: "max-seats",
+        });
+        const otherSeat = yield* makeClaudeContinuationGroupKey({
+          homePath: "~/.claude-acct3",
+          continuationGroup: "max-seats",
+        });
+        expect(grouped).toBe("claude:group:max-seats");
+        expect(otherSeat).toBe(grouped);
+        // whitespace-only group falls back to the home identity
+        const path = yield* Path.Path;
+        const resolved = path.resolve(NodeOS.homedir(), ".claude-acct2");
+        expect(
+          yield* makeClaudeContinuationGroupKey({
+            homePath: "~/.claude-acct2",
+            continuationGroup: "  ",
+          }),
+        ).toBe(`claude:home:${resolved}`);
       }),
     );
   });

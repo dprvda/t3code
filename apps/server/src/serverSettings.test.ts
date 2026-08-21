@@ -188,6 +188,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         enabled: true,
         binaryPath: "/usr/local/bin/claude",
         homePath: "",
+        continuationGroup: "",
         customModels: ["claude-custom"],
         launchArgs: "",
       });
@@ -579,6 +580,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         enabled: true,
         binaryPath: "/opt/homebrew/bin/claude",
         homePath: "",
+        continuationGroup: "",
         customModels: [],
         launchArgs: "",
       });

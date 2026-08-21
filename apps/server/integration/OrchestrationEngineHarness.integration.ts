@@ -46,6 +46,11 @@ import {
 import { ProviderService } from "../src/provider/Services/ProviderService.ts";
 import { AnalyticsService } from "../src/telemetry/Services/AnalyticsService.ts";
 import { CheckpointReactorLive } from "../src/orchestration/Layers/CheckpointReactor.ts";
+import {
+  ClaudeSeatLimits,
+  ClaudeSeatRotationReactorLive,
+} from "../src/orchestration/Layers/ClaudeSeatRotationReactor.ts";
+import { ClaudeSeatRotationReactor } from "../src/orchestration/Services/ClaudeSeatRotationReactor.ts";
 import * as RepositoryIdentityResolver from "../src/project/RepositoryIdentityResolver.ts";
 import { OrchestrationEngineLive } from "../src/orchestration/Layers/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "../src/orchestration/Layers/ProjectionPipeline.ts";
@@ -55,6 +60,7 @@ import * as ThreadPlanProgress from "../src/orchestration/ThreadPlanProgress.ts"
 import { RuntimeReceiptBusTest } from "../src/orchestration/Layers/RuntimeReceiptBus.ts";
 import { OrchestrationReactorLive } from "../src/orchestration/Layers/OrchestrationReactor.ts";
 import { ProviderCommandReactorLive } from "../src/orchestration/Layers/ProviderCommandReactor.ts";
+import type { SeatLimitsFetcher } from "../src/provider/claudeSeatLimits.ts";
 import { ProviderRuntimeIngestionLive } from "../src/orchestration/Layers/ProviderRuntimeIngestion.ts";
 import { CheckpointReactor } from "../src/orchestration/Services/CheckpointReactor.ts";
 import { ProviderRuntimeIngestionService } from "../src/orchestration/Services/ProviderRuntimeIngestion.ts";
@@ -223,12 +229,15 @@ export interface OrchestrationIntegrationHarness {
   };
   readonly drainProviderRuntime: Effect.Effect<void>;
   readonly drainCheckpointReactor: Effect.Effect<void>;
+  readonly drainClaudeSeatRotation: Effect.Effect<void>;
   readonly dispose: Effect.Effect<void, never>;
 }
 
 interface MakeOrchestrationIntegrationHarnessOptions {
   readonly provider?: ProviderDriverKind;
   readonly realCodex?: boolean;
+  /** Scripted seat meters for the Claude seat rotation reactor. Defaults to unreachable meters. */
+  readonly claudeSeatLimits?: SeatLimitsFetcher;
 }
 
 export const makeOrchestrationIntegrationHarness = (
@@ -365,10 +374,21 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(WorkspacePaths.layer),
       Layer.provideMerge(VcsProcess.layer),
     );
+    const claudeSeatLimitsLayer = Layer.succeed(
+      ClaudeSeatLimits,
+      options?.claudeSeatLimits ?? { fetchSeatLimits: () => Promise.resolve(null) },
+    );
+    const claudeSeatRotationReactorLayer = ClaudeSeatRotationReactorLive.pipe(
+      Layer.provide(claudeSeatLimitsLayer),
+      Layer.provideMerge(runtimeServicesLayer),
+      Layer.provideMerge(serverSettingsLayer),
+      Layer.provideMerge(VcsProcess.layer),
+    );
     const orchestrationReactorLayer = OrchestrationReactorLive.pipe(
       Layer.provideMerge(runtimeIngestionLayer),
       Layer.provideMerge(providerCommandReactorLayer),
       Layer.provideMerge(checkpointReactorLayer),
+      Layer.provideMerge(claudeSeatRotationReactorLayer),
       Layer.provideMerge(
         Layer.succeed(ThreadDeletionReactor, {
           start: () => Effect.void,
@@ -406,6 +426,10 @@ export const makeOrchestrationIntegrationHarness = (
     ).pipe(Effect.orDie);
     const checkpointReactor = yield* tryRuntimePromise("load CheckpointReactor service", () =>
       runtime.runPromise(Effect.service(CheckpointReactor)),
+    ).pipe(Effect.orDie);
+    const claudeSeatRotationReactor = yield* tryRuntimePromise(
+      "load ClaudeSeatRotationReactor service",
+      () => runtime.runPromise(Effect.service(ClaudeSeatRotationReactor)),
     ).pipe(Effect.orDie);
     const snapshotQuery = yield* tryRuntimePromise("load ProjectionSnapshotQuery service", () =>
       runtime.runPromise(Effect.service(ProjectionSnapshotQuery)),
@@ -573,6 +597,7 @@ export const makeOrchestrationIntegrationHarness = (
       waitForReceipt,
       drainProviderRuntime: providerRuntimeIngestion.drain,
       drainCheckpointReactor: checkpointReactor.drain,
+      drainClaudeSeatRotation: claudeSeatRotationReactor.drain,
       dispose,
     } satisfies OrchestrationIntegrationHarness;
   });

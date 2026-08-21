@@ -35,7 +35,16 @@ export const makeClaudeEnvironment = Effect.fn("makeClaudeEnvironment")(function
 });
 
 export const makeClaudeContinuationGroupKey = Effect.fn("makeClaudeContinuationGroupKey")(
-  function* (config: Pick<ClaudeSettings, "homePath">): Effect.fn.Return<string, never, Path.Path> {
+  function* (
+    config: Pick<ClaudeSettings, "homePath" | "continuationGroup">,
+  ): Effect.fn.Return<string, never, Path.Path> {
+    // An explicit continuation group asserts that the instances' config dirs
+    // share Claude session storage (a linked projects directory), so their
+    // resume state is interchangeable even though the home paths differ.
+    const continuationGroup = config.continuationGroup.trim();
+    if (continuationGroup.length > 0) {
+      return `claude:group:${continuationGroup}`;
+    }
     const resolvedHomePath = yield* resolveClaudeHomePath(config);
     return `claude:home:${resolvedHomePath}`;
   },

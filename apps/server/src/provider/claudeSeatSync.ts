@@ -139,11 +139,9 @@ export function syncSeatDirs(home: string = NodeOS.homedir()): string[] {
       const baseP = NodePath.join(home, ".claude.json");
       const seatP = NodePath.join(dir, ".claude.json");
       if (NodeFS.existsSync(baseP) && NodeFS.existsSync(seatP)) {
-        // @effect-diagnostics-next-line preferSchemaOverJson:off - foreign Claude Code config file, shape owned by the CLI.
         const base = JSON.parse(NodeFS.readFileSync(baseP, "utf8")) as {
           projects?: Record<string, unknown>;
         };
-        // @effect-diagnostics-next-line preferSchemaOverJson:off - foreign Claude Code config file, shape owned by the CLI.
         const seat = JSON.parse(NodeFS.readFileSync(seatP, "utf8")) as Record<string, unknown>;
         const { merged, added } = mergeTrustedProjects(base, seat);
         if (added > 0) {

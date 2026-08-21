@@ -215,6 +215,13 @@ export function stripAnsi(s: string): string {
     .replace(/\x1b./g, "");
 }
 
+// One-shot match for a COMPLETE text (a turn error message, a notification):
+// no rolling window needed, same strict pattern.
+export function matchLimitBanner(text: string): string | null {
+  const m = LIMIT_RE.exec(stripAnsi(text).replace(/\s+/g, " "));
+  return m ? m[0] : null;
+}
+
 export interface LimitBannerScanner {
   scan(streamId: string, chunk: string): string | null;
   drop(streamId: string): void;
