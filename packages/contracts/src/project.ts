@@ -75,6 +75,27 @@ export const ProjectListEntriesInput = Schema.Struct({
 });
 export type ProjectListEntriesInput = typeof ProjectListEntriesInput.Type;
 
+/** A read-first document candidate for launching a thread. */
+export const ProjectDocBrick = Schema.Struct({
+  rel: TrimmedNonEmptyString,
+  exists: Schema.Boolean,
+  chars: Schema.Int,
+  // chars/4 estimate, labeled approximate in clients
+  tokens: Schema.Int,
+});
+export type ProjectDocBrick = typeof ProjectDocBrick.Type;
+
+export const ProjectDocBricksInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  extras: Schema.optional(Schema.Array(Schema.String)),
+});
+export type ProjectDocBricksInput = typeof ProjectDocBricksInput.Type;
+
+export const ProjectDocBricksResult = Schema.Struct({
+  bricks: Schema.Array(ProjectDocBrick),
+});
+export type ProjectDocBricksResult = typeof ProjectDocBricksResult.Type;
+
 export const ProjectListEntriesResult = Schema.Struct({
   entries: Schema.Array(ProjectEntry),
   truncated: Schema.Boolean,

@@ -258,6 +258,7 @@ import {
 } from "../state/entities";
 import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
+import { DocBricksPicker } from "./chat/DocBricksPicker";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
@@ -1280,6 +1281,12 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const composerDraftTarget: ScopedThreadRef | DraftId =
     routeKind === "server" ? routeThreadRef : props.draftId;
+  // Read-first doc bricks: session-scoped selection per composer target.
+  const [docBrickSelections, setDocBrickSelections] = useState<Record<string, readonly string[]>>(
+    {},
+  );
+  const docBricksSelectionKey = JSON.stringify(composerDraftTarget);
+  const selectedDocBricks = docBrickSelections[docBricksSelectionKey] ?? [];
   const draftThread = useComposerDraftStore((store) =>
     routeKind === "server"
       ? store.getDraftSessionByRef(routeThreadRef)
@@ -5219,12 +5226,18 @@ function ChatViewContent(props: ChatViewProps) {
       messageTextWithPreviewAnnotations,
       composerReviewCommentsSnapshot,
     );
+    const docBricksPrefix =
+      selectedDocBricks.length > 0
+        ? `read these repo docs first, in order, before any other work:\n${selectedDocBricks
+            .map((rel) => `- ${rel}`)
+            .join("\n")}\n\n`
+        : "";
     const outgoingMessageText = formatOutgoingPrompt({
       provider: ctxSelectedProvider,
       model: ctxSelectedModel,
       models: ctxSelectedProviderModels,
       effort: ctxSelectedPromptEffort,
-      text: messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
+      text: docBricksPrefix + (messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT),
     });
     if (composerRef.current?.validateProviderInput(outgoingMessageText) === false) {
       return;
@@ -5431,6 +5444,9 @@ function ChatViewContent(props: ChatViewProps) {
       } else {
         turnStartSucceeded = true;
         acknowledgeActiveThreadWoke();
+        if (selectedDocBricks.length > 0) {
+          setDocBrickSelections((previous) => ({ ...previous, [docBricksSelectionKey]: [] }));
+        }
       }
     }
 
@@ -6539,6 +6555,21 @@ function ChatViewContent(props: ChatViewProps) {
                           <ChatComposer
                             composerRef={composerRef}
                             composerDraftTarget={composerDraftTarget}
+                            docBricksPicker={
+                              activeProject ? (
+                                <DocBricksPicker
+                                  environmentId={environmentId}
+                                  cwd={activeProject.workspaceRoot}
+                                  selected={selectedDocBricks}
+                                  onChange={(next) =>
+                                    setDocBrickSelections((previous) => ({
+                                      ...previous,
+                                      [docBricksSelectionKey]: next,
+                                    }))
+                                  }
+                                />
+                              ) : null
+                            }
                             environmentId={environmentId}
                             routeKind={routeKind}
                             routeThreadRef={routeThreadRef}

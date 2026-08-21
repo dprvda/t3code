@@ -90,6 +90,7 @@ import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
+import { docBricks } from "./workspace/docBricks.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import { readWorkflowScript } from "./orchestration/workflowScriptQuery.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
@@ -1807,6 +1808,12 @@ const makeWsRpcLayer = (
                   }),
               ),
             ),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.projectsDocBricks]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsDocBricks,
+            Effect.sync(() => ({ bricks: docBricks(input.cwd, input.extras ?? []) })),
             { "rpc.aggregate": "workspace" },
           ),
         [WS_METHODS.projectsListEntries]: (input) =>

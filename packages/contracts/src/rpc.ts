@@ -100,6 +100,8 @@ import {
 } from "./relayClient.ts";
 import {
   ProjectListEntriesError,
+  ProjectDocBricksInput,
+  ProjectDocBricksResult,
   ProjectListEntriesInput,
   ProjectListEntriesResult,
   ProjectReadFileError,
@@ -199,6 +201,7 @@ export const WS_METHODS = {
   projectsAdd: "projects.add",
   projectsRemove: "projects.remove",
   projectsListEntries: "projects.listEntries",
+  projectsDocBricks: "projects.docBricks",
   projectsReadFile: "projects.readFile",
   projectsSearchContents: "projects.searchContents",
   projectsSearchEntries: "projects.searchEntries",
@@ -636,6 +639,12 @@ export const WsProjectsListEntriesRpc = Rpc.make(WS_METHODS.projectsListEntries,
   error: Schema.Union([ProjectListEntriesError, EnvironmentAuthorizationError]),
 });
 
+export const WsProjectsDocBricksRpc = Rpc.make(WS_METHODS.projectsDocBricks, {
+  payload: ProjectDocBricksInput,
+  success: ProjectDocBricksResult,
+  error: Schema.Union([ProjectListEntriesError, EnvironmentAuthorizationError]),
+});
+
 export const WsProjectsReadFileRpc = Rpc.make(WS_METHODS.projectsReadFile, {
   payload: ProjectReadFileInput,
   success: ProjectReadFileResult,
@@ -1026,6 +1035,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,
+  WsProjectsDocBricksRpc,
   WsProjectsListEntriesRpc,
   WsProjectsReadFileRpc,
   WsProjectsSearchContentsRpc,

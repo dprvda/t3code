@@ -541,6 +541,9 @@ export interface ChatComposerProps {
   forceExpandedOnMobile: boolean;
   projectSelectionRequired: boolean;
 
+  // Read-first doc bricks pill (built by ChatView, which owns project scope)
+  docBricksPicker?: ReactNode;
+
   // Session phase
   phase: SessionPhase;
   isConnecting: boolean;
@@ -3353,6 +3356,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                           {providerTraitsPicker}
                         </>
                       ) : null}
+                      {props.docBricksPicker}
                       <ComposerFooterModeControls
                         showInteractionModeToggle={
                           composerProviderControls.showInteractionModeToggle
