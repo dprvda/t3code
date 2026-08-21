@@ -139,7 +139,13 @@ function agentActivityText(agent: RuntimeSubagent): string | null {
 }
 
 /** Flat, non-interactive agent status line. No unfold. */
-function AgentRow({ agent }: { agent: RuntimeSubagent }) {
+function AgentRow({
+  agent,
+  onOpen,
+}: {
+  agent: RuntimeSubagent;
+  onOpen?: (agent: RuntimeSubagent) => void;
+}) {
   const visuals = STATUS_VISUALS[agent.status];
   const activity = agentActivityText(agent);
   const modelLabel = formatSubagentModelLabel(agent.model, agent.effort);
@@ -155,7 +161,12 @@ function AgentRow({ agent }: { agent: RuntimeSubagent }) {
   ].filter((value): value is string => value !== null);
 
   return (
-    <div className="grid h-[3.875rem] grid-cols-[0.375rem_minmax(0,1fr)_auto] grid-rows-[1.25rem_1.125rem_1rem] items-center gap-x-2 rounded-md px-1.5 py-1">
+    <button
+      type="button"
+      onClick={() => onOpen?.(agent)}
+      title="Open this subagent's full transcript"
+      className="grid h-[3.875rem] w-full grid-cols-[0.375rem_minmax(0,1fr)_auto] grid-rows-[1.25rem_1.125rem_1rem] items-center gap-x-2 rounded-md px-1.5 py-1 text-left hover:bg-accent/60"
+    >
       <span className="col-start-1 row-start-1 flex items-center">
         <StatusDot status={agent.status} />
       </span>
@@ -187,7 +198,7 @@ function AgentRow({ agent }: { agent: RuntimeSubagent }) {
         {metadata.join(" · ")}
       </span>
       <span className="sr-only">{visuals.label}</span>
-    </div>
+    </button>
   );
 }
 
@@ -531,6 +542,7 @@ export function AgentsPanel({
   threadId?: ThreadId | null;
 }) {
   const [transcriptsOpen, setTranscriptsOpen] = useState(false);
+  const [preselectAgentId, setPreselectAgentId] = useState<string | null>(null);
   if (!model.hasAgents) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
@@ -562,7 +574,14 @@ export function AgentsPanel({
                 Direct spawns
               </div>
               {model.directAgents.map((agent) => (
-                <AgentRow key={agent.id} agent={agent} />
+                <AgentRow
+                  key={agent.id}
+                  agent={agent}
+                  onOpen={(picked) => {
+                    setPreselectAgentId(picked.id);
+                    setTranscriptsOpen(true);
+                  }}
+                />
               ))}
             </section>
           ) : null}
@@ -597,6 +616,7 @@ export function AgentsPanel({
           threadId={threadId}
           open={transcriptsOpen}
           onOpenChange={setTranscriptsOpen}
+          preselectAgentId={preselectAgentId}
         />
       ) : null}
     </div>
