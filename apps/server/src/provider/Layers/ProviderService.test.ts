@@ -2045,3 +2045,126 @@ describe("agent browser access", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });
+
+it.effect(
+  "ProviderServiceLive inherits a persisted resume cursor across continuation-compatible instances",
+  () =>
+    Effect.gen(function* () {
+      const tempDir = NodeFS.mkdtempSync(
+        NodePath.join(NodeOS.tmpdir(), "t3-provider-service-continuation-"),
+      );
+      const dbPath = NodePath.join(tempDir, "orchestration.sqlite");
+      const persistenceLayer = makeSqlitePersistenceLive(dbPath);
+      const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+        Layer.provide(persistenceLayer),
+      );
+      const directoryLayer = ProviderSessionDirectoryLive.pipe(
+        Layer.provide(runtimeRepositoryLayer),
+      );
+
+      const codex = makeFakeCodexAdapter();
+      const base = makeAdapterRegistryMock({ [CODEX_DRIVER]: codex.adapter });
+      // Two instances sharing a continuation key, one with its own.
+      const KEYS: Record<string, string> = {
+        codex_seat1: "codex:group:seats",
+        codex_seat2: "codex:group:seats",
+        codex_other: "codex:home:/elsewhere",
+      };
+      const registry: typeof base = {
+        ...base,
+        getByInstance: (instanceId) =>
+          String(instanceId) in KEYS
+            ? Effect.succeed(codex.adapter)
+            : base.getByInstance(instanceId),
+        getInstanceInfo: (instanceId) => {
+          const continuationKey = KEYS[String(instanceId)];
+          if (continuationKey === undefined) return base.getInstanceInfo(instanceId);
+          return Effect.succeed({
+            instanceId,
+            driverKind: CODEX_DRIVER,
+            displayName: undefined,
+            enabled: true,
+            continuationIdentity: { driverKind: CODEX_DRIVER, continuationKey },
+          });
+        },
+      };
+      const providerLayer = makeProviderServiceLive().pipe(
+        Layer.provide(Layer.succeed(ProviderAdapterRegistry.ProviderAdapterRegistry, registry)),
+        Layer.provide(directoryLayer),
+        Layer.provide(defaultServerSettingsLayer),
+        Layer.provide(serverConfigTestLayer),
+        Layer.provide(AnalyticsService.layerTest),
+        Layer.provide(
+          Layer.succeed(
+            ProviderEventLoggers.ProviderEventLoggers,
+            ProviderEventLoggers.NoOpProviderEventLoggers,
+          ),
+        ),
+      );
+
+      const seededCursor = {
+        threadId: asThreadId("thread-hop"),
+        resume: "resume-session-9",
+        resumeSessionAt: "assistant-message-9",
+        turnCount: 3,
+      };
+      yield* Effect.gen(function* () {
+        const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+        yield* directory.upsert({
+          provider: CODEX_DRIVER,
+          providerInstanceId: ProviderInstanceId.make("codex_seat1"),
+          threadId: asThreadId("thread-hop"),
+          status: "stopped",
+          resumeCursor: seededCursor,
+          runtimePayload: { cwd: "/tmp/hop-project" },
+        });
+      }).pipe(Effect.provide(directoryLayer));
+
+      // continuation-compatible instance: cursor and cwd are inherited
+      yield* Effect.gen(function* () {
+        const provider = yield* ProviderService.ProviderService;
+        yield* provider.startSession(asThreadId("thread-hop"), {
+          provider: CODEX_DRIVER,
+          providerInstanceId: ProviderInstanceId.make("codex_seat2"),
+          runtimeMode: "full-access",
+          threadId: asThreadId("thread-hop"),
+        });
+      }).pipe(Effect.provide(providerLayer));
+      const hopStart = codex.startSession.mock.calls.at(-1)?.[0] as {
+        resumeCursor?: unknown;
+        cwd?: string;
+      };
+      assert.deepEqual(hopStart.resumeCursor, seededCursor);
+      assert.equal(hopStart.cwd, "/tmp/hop-project");
+
+      // incompatible instance: nothing is inherited
+      yield* Effect.gen(function* () {
+        const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+        yield* directory.upsert({
+          provider: CODEX_DRIVER,
+          providerInstanceId: ProviderInstanceId.make("codex_seat1"),
+          threadId: asThreadId("thread-stranger"),
+          status: "stopped",
+          resumeCursor: seededCursor,
+          runtimePayload: { cwd: "/tmp/hop-project" },
+        });
+      }).pipe(Effect.provide(directoryLayer));
+      yield* Effect.gen(function* () {
+        const provider = yield* ProviderService.ProviderService;
+        yield* provider.startSession(asThreadId("thread-stranger"), {
+          provider: CODEX_DRIVER,
+          providerInstanceId: ProviderInstanceId.make("codex_other"),
+          runtimeMode: "full-access",
+          threadId: asThreadId("thread-stranger"),
+        });
+      }).pipe(Effect.provide(providerLayer));
+      const strangerStart = codex.startSession.mock.calls.at(-1)?.[0] as {
+        resumeCursor?: unknown;
+        cwd?: string;
+      };
+      assert.equal(strangerStart.resumeCursor, undefined);
+      assert.equal(strangerStart.cwd, undefined);
+
+      NodeFS.rmSync(tempDir, { recursive: true, force: true });
+    }).pipe(Effect.provide(NodeServices.layer)),
+);

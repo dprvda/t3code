@@ -618,31 +618,44 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           );
         }
         const persistedBinding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+        // A persisted binding from a different instance still carries usable
+        // resume state when both instances share a continuation key (same
+        // provider home, or an explicit continuation group): that is the
+        // definition of continuation compatibility. Without this, a seat
+        // switch on a stopped session silently restarts from scratch.
+        const persistedBindingContinuationCompatible = yield* Effect.gen(function* () {
+          if (persistedBinding?.providerInstanceId === undefined) return false;
+          if (persistedBinding.providerInstanceId === resolvedInstanceId) return true;
+          const persistedInfo = yield* registry
+            .getInstanceInfo(persistedBinding.providerInstanceId)
+            .pipe(Effect.option, Effect.map(Option.getOrUndefined));
+          return (
+            persistedInfo !== undefined &&
+            persistedInfo.continuationIdentity.continuationKey ===
+              instanceInfo.continuationIdentity.continuationKey
+          );
+        });
         const effectiveResumeCursor =
           input.resumeCursor ??
-          (persistedBinding?.providerInstanceId === resolvedInstanceId
-            ? persistedBinding.resumeCursor
-            : undefined);
+          (persistedBindingContinuationCompatible ? persistedBinding?.resumeCursor : undefined);
         const effectiveCwd =
           input.cwd ??
-          (persistedBinding?.providerInstanceId === resolvedInstanceId
-            ? readPersistedCwd(persistedBinding.runtimePayload)
+          (persistedBindingContinuationCompatible
+            ? readPersistedCwd(persistedBinding?.runtimePayload)
             : undefined);
         yield* Effect.annotateCurrentSpan({
           "provider.kind": resolvedProvider,
           "provider.resume_cursor.source":
             input.resumeCursor !== undefined
               ? "request"
-              : effectiveResumeCursor !== undefined &&
-                  persistedBinding?.providerInstanceId === resolvedInstanceId
+              : effectiveResumeCursor !== undefined && persistedBindingContinuationCompatible
                 ? "persisted"
                 : "none",
           "provider.resume_cursor.present": effectiveResumeCursor !== undefined,
           "provider.cwd.source":
             input.cwd !== undefined
               ? "request"
-              : effectiveCwd !== undefined &&
-                  persistedBinding?.providerInstanceId === resolvedInstanceId
+              : effectiveCwd !== undefined && persistedBindingContinuationCompatible
                 ? "persisted"
                 : "none",
           "provider.cwd.effective": effectiveCwd ?? "",
