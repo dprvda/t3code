@@ -1,6 +1,7 @@
 import {
   ArrowLeftIcon,
   ChartNoAxesColumnIcon,
+  LayoutGridIcon,
   GitPullRequestIcon,
   SettingsIcon,
 } from "lucide-react";
@@ -153,9 +154,11 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
         ? "settings"
         : location.pathname === "/usage"
           ? "usage"
-          : location.pathname === "/pull-requests"
-            ? "pull-requests"
-            : null,
+          : location.pathname === "/grid"
+            ? "grid"
+            : location.pathname === "/pull-requests"
+              ? "pull-requests"
+              : null,
   });
   const { environments } = useEnvironments();
   // The page reads every connected server, so one of them offering pull requests is enough for
@@ -183,6 +186,11 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     }
     void navigate({ to: "/usage" });
   }, [isMobile, navigate, setOpenMobile]);
+
+  const handleGridClick = useCallback(() => {
+    closeMobileSidebar();
+    void navigate({ to: "/grid" });
+  }, [closeMobileSidebar, navigate]);
 
   const handleBackClick = useCallback(() => {
     closeMobileSidebar();
@@ -216,6 +224,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
               onClick={handlePullRequestsClick}
             />
           ) : null}
+          <SidebarUtilityItem icon={<LayoutGridIcon />} label="Grid" onClick={handleGridClick} />
           <SidebarUtilityItem
             icon={<ChartNoAxesColumnIcon />}
             label="Usage"
