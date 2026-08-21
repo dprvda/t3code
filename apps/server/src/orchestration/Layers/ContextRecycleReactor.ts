@@ -323,7 +323,22 @@ const make = Effect.gen(function* () {
     ) {
       return;
     }
-    if (event.payload.state !== "completed" || !state.markerSeen) {
+    // The completion marker can arrive as the streamed item OR as the turn's
+    // final result text (routed models deliver the short final answer as the
+    // result, not a separate assistant item). Fall back to the thread's
+    // latest assistant message, which the projection holds either way.
+    const markerInLatestMessage = yield* Effect.gen(function* () {
+      if (state.markerSeen) return true;
+      const thread = yield* resolveThread(threadId);
+      const lastAssistant = thread?.messages
+        ? [...thread.messages].reverse().find((message) => message.role === "assistant")
+        : undefined;
+      return (
+        lastAssistant !== undefined &&
+        lastAssistant.text.trimStart().toLowerCase().startsWith(HANDOFF_DONE_MARKER)
+      );
+    });
+    if (event.payload.state !== "completed" || !markerInLatestMessage) {
       states.delete(threadKey);
       yield* appendRecycleActivity({
         threadId,

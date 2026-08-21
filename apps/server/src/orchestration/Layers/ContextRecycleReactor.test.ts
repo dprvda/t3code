@@ -11,6 +11,7 @@ import {
   EventId,
   ProjectId,
   ProviderDriverKind,
+  MessageId,
   ProviderInstanceId,
   RuntimeItemId,
   ThreadId,
@@ -262,6 +263,32 @@ describe("ContextRecycleReactor", () => {
     const emitTurnCompleted = (eventId: string, state = "completed") =>
       emitTurnCompletedFor(eventId, "turn-2", state);
 
+    // Land an assistant message in the projection directly (no item.completed),
+    // the way a routed model's final result text arrives.
+    const putAssistantMessage = (messageId: string, text: string) =>
+      Effect.runPromise(
+        engine
+          .dispatch({
+            type: "thread.message.assistant.delta",
+            commandId: CommandId.make(`cmd-${messageId}-delta`),
+            threadId: THREAD,
+            messageId: MessageId.make(messageId),
+            delta: text,
+            createdAt: NOW,
+          })
+          .pipe(
+            Effect.andThen(
+              engine.dispatch({
+                type: "thread.message.assistant.complete",
+                commandId: CommandId.make(`cmd-${messageId}-complete`),
+                threadId: THREAD,
+                messageId: MessageId.make(messageId),
+                createdAt: NOW,
+              }),
+            ),
+          ),
+      );
+
     const readModel = () => Effect.runPromise(snapshotQuery.getSnapshot());
     const readThread = async () => {
       const model = await readModel();
@@ -287,6 +314,7 @@ describe("ContextRecycleReactor", () => {
       emitAssistantItem,
       emitTurnCompleted,
       emitTurnCompletedFor,
+      putAssistantMessage,
     };
   }
 
@@ -339,6 +367,23 @@ describe("ContextRecycleReactor", () => {
     await waitFor(async () => (await harness.messagesWith(SUCCESSOR_RESUME_PROMPT)).length > 0);
     await harness.drain();
 
+    const thread = await harness.readThread();
+    expect(thread.activities.some((entry) => entry.kind === "context-recycle.handoff-failed")).toBe(
+      false,
+    );
+    expect(await harness.messagesWith(SUCCESSOR_RESUME_PROMPT)).toHaveLength(1);
+  });
+
+  it("recycles when the marker arrives only as the projected result (not a streamed item)", async () => {
+    const harness = await createHarness();
+    await harness.emitUsage("evt-usage-1", 700_000, 1_000_000);
+    await waitFor(async () => (await harness.messagesWith(STANDARD_HANDOFF_PROMPT)).length > 0);
+    // routed-model shape: final answer lands as a projected assistant message,
+    // NO item.completed carrying the marker
+    await harness.putAssistantMessage("asst-marker", "handoff procedure finished");
+    await harness.emitTurnCompleted("evt-handoff-done");
+    await waitFor(async () => (await harness.messagesWith(SUCCESSOR_RESUME_PROMPT)).length > 0);
+    await harness.drain();
     const thread = await harness.readThread();
     expect(thread.activities.some((entry) => entry.kind === "context-recycle.handoff-failed")).toBe(
       false,
