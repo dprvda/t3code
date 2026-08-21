@@ -17,6 +17,7 @@ import {
   type SettleThreadInput,
   type SnoozeThreadInput,
   type StartThreadTurnInput,
+  type RequestThreadRecycleInput,
   type StopThreadSessionInput,
   type UnarchiveThreadInput,
   type UnpinThreadInput,
@@ -37,6 +38,7 @@ import {
   settleThread,
   snoozeThread,
   startThreadTurn,
+  requestThreadRecycle,
   stopThreadSession,
   unarchiveThread,
   unpinThread,
@@ -47,6 +49,7 @@ import {
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 
 export type {
+  RequestThreadRecycleInput,
   ArchiveThreadInput,
   CreateThreadInput,
   DeleteThreadInput,
@@ -196,6 +199,12 @@ export function createThreadEnvironmentAtoms<R, E>(
     stopSession: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:stop-session",
       execute: (input: StopThreadSessionInput) => stopThreadSession(input),
+      scheduler,
+      concurrency,
+    }),
+    requestRecycle: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:request-recycle",
+      execute: (input: RequestThreadRecycleInput) => requestThreadRecycle(input),
       scheduler,
       concurrency,
     }),

@@ -23,6 +23,7 @@ import {
   MessageId,
   ThreadId,
   TurnId,
+  type OrchestrationEvent,
   type ProviderRuntimeEvent,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -52,10 +53,16 @@ import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts"
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
-type RecycleInputEvent = Extract<
+type RecycleRuntimeEvent = Extract<
   ProviderRuntimeEvent,
   { type: "thread.token-usage.updated" } | { type: "item.completed" } | { type: "turn.completed" }
 >;
+
+type RecycleDomainEvent = Extract<OrchestrationEvent, { type: "thread.recycle-requested" }>;
+
+type RecycleInput =
+  | { readonly source: "runtime"; readonly event: RecycleRuntimeEvent }
+  | { readonly source: "domain"; readonly event: RecycleDomainEvent };
 
 type RecyclePhase =
   | { readonly phase: "armed"; readonly pct: number }
@@ -169,7 +176,10 @@ const make = Effect.gen(function* () {
       turnId,
       tone: "info",
       kind: "context-recycle.handoff-requested",
-      summary: `Context at ${Math.round(pct)}% — requesting handoff`,
+      summary:
+        pct < 0
+          ? "Manual recycle — requesting handoff"
+          : `Context at ${Math.round(pct)}% — requesting handoff`,
       payload: { pct },
       createdAt: yield* nowIso,
     });
@@ -224,8 +234,24 @@ const make = Effect.gen(function* () {
     states.set(String(threadId), { phase: "cooldown" });
   });
 
+  // Manual recycle: skip the enabled/threshold gate — the user asked for it.
+  const processDomainEvent = Effect.fn("processDomainEvent")(function* (event: RecycleDomainEvent) {
+    const payload = event.payload as { threadId: string };
+    const threadKey = String(payload.threadId);
+    const threadId = ThreadId.make(threadKey);
+    const existing = states.get(threadKey);
+    if (existing !== undefined && existing.phase !== "cooldown") return; // already in progress
+    const thread = yield* resolveThread(threadId);
+    if (!thread) return;
+    if (thread.latestTurn?.state === "running") {
+      states.set(threadKey, { phase: "armed", pct: -1 });
+      return;
+    }
+    yield* requestHandoff(threadId, -1, String(event.eventId), null);
+  });
+
   const processRuntimeEvent = Effect.fn("processRuntimeEvent")(function* (
-    event: RecycleInputEvent,
+    event: RecycleRuntimeEvent,
   ) {
     const threadKey = String(event.threadId);
     const threadId = ThreadId.make(threadKey);
@@ -309,21 +335,24 @@ const make = Effect.gen(function* () {
     yield* finalizeRecycle(threadId, state.pct, String(event.eventId), turnId);
   });
 
-  const processRuntimeEventSafely = (event: RecycleInputEvent) =>
-    processRuntimeEvent(event).pipe(
+  const processInput = (input: RecycleInput) =>
+    input.source === "runtime" ? processRuntimeEvent(input.event) : processDomainEvent(input.event);
+
+  const processInputSafely = (input: RecycleInput) =>
+    processInput(input).pipe(
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
           return Effect.failCause(cause);
         }
         return Effect.logWarning("context recycle reactor failed to process event", {
-          eventType: event.type,
-          threadId: event.threadId,
+          source: input.source,
+          eventType: input.event.type,
           cause: Cause.pretty(cause),
         });
       }),
     );
 
-  const worker = yield* makeDrainableWorker(processRuntimeEventSafely);
+  const worker = yield* makeDrainableWorker(processInputSafely);
 
   const start: ContextRecycleReactorShape["start"] = Effect.fn("start")(function* () {
     yield* forkParked(
@@ -335,7 +364,16 @@ const make = Effect.gen(function* () {
         ) {
           return Effect.void;
         }
-        return worker.enqueue(event);
+        return worker.enqueue({ source: "runtime", event });
+      }),
+    );
+
+    yield* forkParked(
+      Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
+        if (event.type !== "thread.recycle-requested") {
+          return Effect.void;
+        }
+        return worker.enqueue({ source: "domain", event: event as RecycleDomainEvent });
       }),
     );
   });

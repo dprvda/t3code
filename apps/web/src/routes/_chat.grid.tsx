@@ -4,13 +4,16 @@ import type {
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/models";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { HandIcon } from "lucide-react";
+import { HandIcon, RecycleIcon } from "lucide-react";
 import { useMemo } from "react";
 
 import { resolveThreadStatusPill, type ThreadStatusPill } from "../components/Sidebar.logic";
 import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { useProjects, useThreadDetail, useThreadShells } from "../state/entities";
+import { threadEnvironment } from "../state/threads";
+import { useAtomCommand } from "../state/use-atom-command";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { cn } from "~/lib/utils";
 
 /** Fallback pill for settled/idle states the sidebar resolver leaves null. */
@@ -87,6 +90,7 @@ function ThreadCell({
   readonly projectTitle: string;
 }) {
   const detail = useThreadDetail(scopeThreadRef(shell.environmentId, shell.id));
+  const requestRecycle = useAtomCommand(threadEnvironment.requestRecycle, "thread recycle request");
   const pill = resolveThreadStatusPill({ thread: shell }) ?? fallbackStatusPill(shell);
   const word = statusWord(shell, pill);
   const pct = contextUsagePct(detail);
@@ -116,6 +120,31 @@ function ThreadCell({
             <HandIcon className="size-3" /> needs you
           </span>
         ) : null}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                aria-label="Recycle session"
+                className={cn(
+                  "shrink-0 rounded-md p-1 text-secondary-label hover:bg-accent hover:text-foreground",
+                  needsYou ? "" : "ml-auto",
+                )}
+                onClick={(clickEvent) => {
+                  clickEvent.preventDefault();
+                  clickEvent.stopPropagation();
+                  void requestRecycle({
+                    environmentId: shell.environmentId,
+                    input: { threadId: shell.id },
+                  });
+                }}
+              />
+            }
+          >
+            <RecycleIcon className="size-3.5" />
+          </TooltipTrigger>
+          <TooltipPopup side="top">Recycle: handoff, then a fresh session</TooltipPopup>
+        </Tooltip>
       </div>
       <div className="min-w-0">
         <div className="truncate font-medium text-sm" title={shell.title}>

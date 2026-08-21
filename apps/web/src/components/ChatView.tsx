@@ -259,6 +259,7 @@ import {
 import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { DocBricksPicker } from "./chat/DocBricksPicker";
+import { ThreadRecycleControl } from "./chat/ThreadRecycleControl";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
@@ -6555,6 +6556,14 @@ function ChatViewContent(props: ChatViewProps) {
                           <ChatComposer
                             composerRef={composerRef}
                             composerDraftTarget={composerDraftTarget}
+                            recycleControl={
+                              isServerThread && activeThreadId !== null ? (
+                                <ThreadRecycleControl
+                                  environmentId={environmentId}
+                                  threadId={activeThreadId}
+                                />
+                              ) : null
+                            }
                             docBricksPicker={
                               activeProject ? (
                                 <DocBricksPicker

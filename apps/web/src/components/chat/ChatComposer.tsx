@@ -544,6 +544,9 @@ export interface ChatComposerProps {
   // Read-first doc bricks pill (built by ChatView, which owns project scope)
   docBricksPicker?: ReactNode;
 
+  // Manual context-recycle control (built by ChatView, server threads only)
+  recycleControl?: ReactNode;
+
   // Session phase
   phase: SessionPhase;
   isConnecting: boolean;
@@ -3357,6 +3360,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         </>
                       ) : null}
                       {props.docBricksPicker}
+                      {props.recycleControl}
                       <ComposerFooterModeControls
                         showInteractionModeToggle={
                           composerProviderControls.showInteractionModeToggle

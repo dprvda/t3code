@@ -386,6 +386,40 @@ describe("ContextRecycleReactor", () => {
     expect(await harness2.messagesWith(STANDARD_HANDOFF_PROMPT)).toHaveLength(0);
   });
 
+  it("a manual recycle request runs the flow even when auto-recycle is disabled", async () => {
+    const harness = await createHarness({ enabled: false });
+    // The engine's domain PubSub has no replay, so a dispatch can race the
+    // reactor's freshly-forked subscription; re-dispatch with fresh command
+    // ids until the subscriber sees one (the reactor's in-progress guard
+    // makes duplicates no-ops).
+    let attempt = 0;
+    await waitFor(async () => {
+      if ((await harness.messagesWith(STANDARD_HANDOFF_PROMPT)).length > 0) return true;
+      attempt += 1;
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.recycle.request",
+          commandId: CommandId.make(`cmd-manual-recycle-${attempt}`),
+          threadId: THREAD,
+          createdAt: NOW,
+        }),
+      );
+      return (await harness.messagesWith(STANDARD_HANDOFF_PROMPT)).length > 0;
+    });
+    await harness.emitAssistantItem("evt-manual-marker", HANDOFF_DONE_MARKER);
+    await harness.emitTurnCompleted("evt-manual-done");
+    await waitFor(async () => (await harness.messagesWith(SUCCESSOR_RESUME_PROMPT)).length > 0);
+    await harness.drain();
+
+    const thread = await harness.readThread();
+    const requested = thread.activities.find(
+      (entry) => entry.kind === "context-recycle.handoff-requested",
+    );
+    expect(requested?.summary).toBe("Manual recycle — requesting handoff");
+    const binding = await harness.readBinding();
+    expect(binding?.resumeCursor ?? null).toBeNull();
+  });
+
   it("trailing high-usage snapshots after a recycle do not re-trigger until usage drops", async () => {
     const harness = await createHarness();
     await harness.emitUsage("evt-usage-1", 80_000, 100_000);
