@@ -12,6 +12,7 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
+  RuntimeItemId,
   ThreadId,
   TurnId,
   type ProviderRuntimeEvent,
@@ -260,6 +261,25 @@ describe("ClaudeSeatRotationReactor", () => {
         } as ProviderRuntimeEvent),
       );
 
+    const emitAssistantItem = (eventId: string, detail: string) =>
+      Effect.runPromise(
+        PubSub.publish(runtimeEventPubSub, {
+          type: "item.completed",
+          eventId: EventId.make(eventId),
+          provider: ProviderDriverKind.make("claudeAgent"),
+          createdAt: NOW,
+          threadId: ThreadId.make("thread-1"),
+          turnId: TurnId.make("turn-1"),
+          itemId: RuntimeItemId.make(`item-${eventId}`),
+          payload: {
+            itemType: "assistant_message",
+            status: "completed",
+            title: "Assistant message",
+            detail,
+          },
+        } as unknown as ProviderRuntimeEvent),
+      );
+
     const readModel = () => Effect.runPromise(snapshotQuery.getSnapshot());
     const readThread = async () => {
       const model = await readModel();
@@ -279,6 +299,7 @@ describe("ClaudeSeatRotationReactor", () => {
       moveMessages,
       drain: () => Effect.runPromise(reactor.drain),
       emitFailedTurn,
+      emitAssistantItem,
       meterFetches,
     };
   }
@@ -345,6 +366,40 @@ describe("ClaudeSeatRotationReactor", () => {
 
     const thread = await harness.readThread();
     expect(String(thread.modelSelection.instanceId)).toBe(String(SEAT_2));
+  });
+
+  it("moves when the limit surfaces as assistant text (SDK api_error turns complete)", async () => {
+    const harness = await createHarness({
+      meterBars: { "/seat-1": [bar("5h", 100)], "/seat-2": [bar("5h", 12)] },
+    });
+    // the live-observed shape: the API error completes the turn and renders
+    // as an assistant message carrying the provider's limit text
+    await harness.emitAssistantItem(
+      "evt-item-1",
+      'API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"You’ve hit your usage limit · resets 8am"}}',
+    );
+    await waitFor(async () => (await harness.moveMessages()).length > 0);
+    await harness.drain();
+
+    const thread = await harness.readThread();
+    expect(String(thread.modelSelection.instanceId)).toBe(String(SEAT_2));
+    expect(harness.meterFetches[0]).toEqual({ configDir: "/seat-1", force: true });
+  });
+
+  it("plain assistant prose never trips the scanner", async () => {
+    const harness = await createHarness({
+      meterBars: { "/seat-1": [bar("5h", 100)], "/seat-2": [bar("5h", 12)] },
+    });
+    await harness.emitAssistantItem(
+      "evt-item-benign",
+      "We are approaching usage limit territory, so plan carefully.",
+    );
+    // FIFO: a subsequent real banner acting proves the benign item was processed
+    await harness.emitFailedTurn("evt-banner-after-benign");
+    await waitFor(async () => (await harness.moveMessages()).length > 0);
+    await harness.drain();
+    expect(await harness.moveMessages()).toHaveLength(1);
+    expect(harness.meterFetches[0]).toEqual({ configDir: "/seat-1", force: true });
   });
 
   it("never rotates a thread on a home-keyed (ungrouped) instance", async () => {

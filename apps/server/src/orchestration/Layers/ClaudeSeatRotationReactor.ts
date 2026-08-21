@@ -45,6 +45,7 @@ import { expandHomePath } from "../../pathExpansion.ts";
 import {
   bannerFamily,
   makeClaudeSeatGuard,
+  makeLimitBannerScanner,
   matchLimitBanner,
   meterBlocked,
   familyBlocked,
@@ -70,6 +71,11 @@ import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts"
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
 const CLAUDE_GROUP_KEY_PREFIX = "claude:group:";
+
+type RotationInputEvent = Extract<
+  ProviderRuntimeEvent,
+  { type: "turn.completed" } | { type: "item.completed" }
+>;
 
 /**
  * The continuation prompt sent as the moved thread's next turn. Ported
@@ -125,6 +131,7 @@ const make = Effect.gen(function* () {
   const serverSettings = yield* ServerSettingsService;
   const seatLimits = yield* ClaudeSeatLimits;
   const guard = makeClaudeSeatGuard();
+  const scanner = makeLimitBannerScanner();
 
   const resolveThread = Effect.fnUntraced(function* (threadId: ThreadId) {
     return yield* projectionSnapshotQuery
@@ -171,13 +178,28 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  const bannerFromEvent = (event: RotationInputEvent): string | null => {
+    if (event.type === "turn.completed") {
+      if (event.payload.state !== "failed" || event.payload.errorMessage === undefined) {
+        return null;
+      }
+      return matchLimitBanner(event.payload.errorMessage);
+    }
+    // Assistant text: the SDK reports API errors (limits included) as a
+    // completed turn whose error text renders as an assistant message, so a
+    // rolling one-shot scan of assistant items is the trigger that fires in
+    // practice. Echo hazards (the agent quoting the phrase) are contained by
+    // the meter confirmation and the hop budget below.
+    if (event.payload.itemType !== "assistant_message") return null;
+    const detail = (event.payload as { detail?: unknown }).detail;
+    if (typeof detail !== "string" || detail.length === 0) return null;
+    return scanner.scan(String(event.threadId), detail);
+  };
+
   const processRuntimeEvent = Effect.fn("processRuntimeEvent")(function* (
-    event: Extract<ProviderRuntimeEvent, { type: "turn.completed" }>,
+    event: RotationInputEvent,
   ) {
-    if (event.payload.state !== "failed") return;
-    const errorMessage = event.payload.errorMessage;
-    if (errorMessage === undefined) return;
-    const banner = matchLimitBanner(errorMessage);
+    const banner = bannerFromEvent(event);
     if (banner === null) return;
 
     const threadId = ThreadId.make(String(event.threadId));
@@ -340,9 +362,7 @@ const make = Effect.gen(function* () {
     });
   });
 
-  const processRuntimeEventSafely = (
-    event: Extract<ProviderRuntimeEvent, { type: "turn.completed" }>,
-  ) =>
+  const processRuntimeEventSafely = (event: RotationInputEvent) =>
     processRuntimeEvent(event).pipe(
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
@@ -361,7 +381,7 @@ const make = Effect.gen(function* () {
   const start: ClaudeSeatRotationReactorShape["start"] = Effect.fn("start")(function* () {
     yield* forkParked(
       Stream.runForEach(providerService.streamEvents, (event) => {
-        if (event.type !== "turn.completed") {
+        if (event.type !== "turn.completed" && event.type !== "item.completed") {
           return Effect.void;
         }
         return worker.enqueue(event);
