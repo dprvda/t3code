@@ -150,6 +150,10 @@
     "./state/vcs": {
       "types": "./src/state/vcs.ts",
       "default": "./src/state/vcs.ts"
+    },
+    "./state/routerPool": {
+      "types": "./src/state/routerPool.ts",
+      "default": "./src/state/routerPool.ts"
     }
   },
   "scripts": {

@@ -118,6 +118,15 @@ import {
   ProjectWriteFileResult,
 } from "./project.ts";
 import {
+  RouterAccountsInput,
+  RouterAccountsResult,
+  RouterAccountToggleInput,
+  RouterLoginStartInput,
+  RouterLoginStatus,
+  RouterLoginStatusInput,
+  RouterPoolError,
+} from "./routerPool.ts";
+import {
   TerminalAttachInput,
   TerminalAttachStreamEvent,
   TerminalClearInput,
@@ -202,6 +211,12 @@ export const WS_METHODS = {
   projectsRemove: "projects.remove",
   projectsListEntries: "projects.listEntries",
   projectsDocBricks: "projects.docBricks",
+
+  // CLIProxyAPI router pool methods
+  routerAccounts: "router.accounts",
+  routerAccountToggle: "router.accountToggle",
+  routerLoginStart: "router.loginStart",
+  routerLoginStatus: "router.loginStatus",
   projectsReadFile: "projects.readFile",
   projectsSearchContents: "projects.searchContents",
   projectsSearchEntries: "projects.searchEntries",
@@ -645,6 +660,30 @@ export const WsProjectsDocBricksRpc = Rpc.make(WS_METHODS.projectsDocBricks, {
   error: Schema.Union([ProjectListEntriesError, EnvironmentAuthorizationError]),
 });
 
+export const WsRouterAccountsRpc = Rpc.make(WS_METHODS.routerAccounts, {
+  payload: RouterAccountsInput,
+  success: RouterAccountsResult,
+  error: Schema.Union([RouterPoolError, EnvironmentAuthorizationError]),
+});
+
+export const WsRouterAccountToggleRpc = Rpc.make(WS_METHODS.routerAccountToggle, {
+  payload: RouterAccountToggleInput,
+  success: RouterAccountsResult,
+  error: Schema.Union([RouterPoolError, EnvironmentAuthorizationError]),
+});
+
+export const WsRouterLoginStartRpc = Rpc.make(WS_METHODS.routerLoginStart, {
+  payload: RouterLoginStartInput,
+  success: RouterLoginStatus,
+  error: Schema.Union([RouterPoolError, EnvironmentAuthorizationError]),
+});
+
+export const WsRouterLoginStatusRpc = Rpc.make(WS_METHODS.routerLoginStatus, {
+  payload: RouterLoginStatusInput,
+  success: RouterLoginStatus,
+  error: Schema.Union([RouterPoolError, EnvironmentAuthorizationError]),
+});
+
 export const WsProjectsReadFileRpc = Rpc.make(WS_METHODS.projectsReadFile, {
   payload: ProjectReadFileInput,
   success: ProjectReadFileResult,
@@ -1036,6 +1075,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,
   WsProjectsDocBricksRpc,
+  WsRouterAccountsRpc,
+  WsRouterAccountToggleRpc,
+  WsRouterLoginStartRpc,
+  WsRouterLoginStatusRpc,
   WsProjectsListEntriesRpc,
   WsProjectsReadFileRpc,
   WsProjectsSearchContentsRpc,

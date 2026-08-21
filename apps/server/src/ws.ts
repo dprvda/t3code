@@ -36,6 +36,7 @@ import {
   type ProjectFileFailure,
   type ProjectFileOperation,
   ProjectListEntriesError,
+  RouterPoolError,
   ProjectReadFileError,
   ProjectSearchContentsError,
   ProjectSearchEntriesError,
@@ -91,6 +92,10 @@ import { issueAssetUrl } from "./assets/AssetAccess.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import { docBricks } from "./workspace/docBricks.ts";
+import { makeRouterAccounts, makeRouterLoginRunner } from "./provider/routerAccounts.ts";
+
+const routerAccountsService = makeRouterAccounts();
+const routerLoginRunner = makeRouterLoginRunner();
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import { readWorkflowScript } from "./orchestration/workflowScriptQuery.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
@@ -1809,6 +1814,68 @@ const makeWsRpcLayer = (
               ),
             ),
             { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.routerAccounts]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routerAccounts,
+            Effect.tryPromise({
+              try: () => routerAccountsService.list(input.force === true),
+              catch: (cause) =>
+                new RouterPoolError({ message: `router accounts unreachable: ${String(cause)}` }),
+            }).pipe(Effect.map((rows) => ({ rows }))),
+            { "rpc.aggregate": "router" },
+          ),
+        [WS_METHODS.routerAccountToggle]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routerAccountToggle,
+            Effect.gen(function* () {
+              const before = yield* Effect.tryPromise({
+                try: () => routerAccountsService.list(),
+                catch: (cause) =>
+                  new RouterPoolError({ message: `router accounts unreachable: ${String(cause)}` }),
+              });
+              if (
+                input.disabled &&
+                before.filter((row) => row.enabled).length <= 1 &&
+                before.some((row) => row.file === input.file && row.enabled)
+              ) {
+                return yield* new RouterPoolError({
+                  message: "refusing to disable the last enabled router account",
+                });
+              }
+              yield* Effect.try({
+                try: () => routerAccountsService.setDisabled(input.file, input.disabled),
+                catch: (cause) => new RouterPoolError({ message: String(cause) }),
+              });
+              const rows = yield* Effect.tryPromise({
+                try: () => routerAccountsService.list(true),
+                catch: (cause) =>
+                  new RouterPoolError({ message: `router accounts unreachable: ${String(cause)}` }),
+              });
+              return { rows };
+            }),
+            { "rpc.aggregate": "router" },
+          ),
+        [WS_METHODS.routerLoginStart]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routerLoginStart,
+            Effect.try({
+              try: () => routerLoginRunner.start(input.provider),
+              catch: (cause) => new RouterPoolError({ message: String(cause) }),
+            }),
+            { "rpc.aggregate": "router" },
+          ),
+        [WS_METHODS.routerLoginStatus]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routerLoginStatus,
+            Effect.gen(function* () {
+              const status = routerLoginRunner.status(input.loginId);
+              if (status === null) {
+                return yield* new RouterPoolError({ message: `unknown login ${input.loginId}` });
+              }
+              return status;
+            }),
+            { "rpc.aggregate": "router" },
           ),
         [WS_METHODS.projectsDocBricks]: (input) =>
           observeRpcEffect(
