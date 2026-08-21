@@ -59,7 +59,16 @@ type RecycleInputEvent = Extract<
 
 type RecyclePhase =
   | { readonly phase: "armed"; readonly pct: number }
-  | { readonly phase: "awaiting-handoff"; readonly pct: number; markerSeen: boolean }
+  | {
+      readonly phase: "awaiting-handoff";
+      readonly pct: number;
+      markerSeen: boolean;
+      // The turn the thread was on when the handoff was requested. Sending
+      // the handoff turn can flush a stale synthetic turn as one more
+      // `turn.completed` for the OLD turn (ClaudeAdapter.sendTurn), which
+      // must not be mistaken for the handoff turn ending.
+      readonly precedingTurnId: string | null;
+    }
   // After a recycle, usage snapshots from the OLD session can still trail in
   // above the threshold; hold until a snapshot from the fresh session lands
   // below it, then resume watching.
@@ -149,7 +158,12 @@ const make = Effect.gen(function* () {
     causeEventId: string,
     turnId: TurnId | null,
   ) {
-    states.set(String(threadId), { phase: "awaiting-handoff", pct, markerSeen: false });
+    states.set(String(threadId), {
+      phase: "awaiting-handoff",
+      pct,
+      markerSeen: false,
+      precedingTurnId: turnId === null ? null : String(turnId),
+    });
     yield* appendRecycleActivity({
       threadId,
       turnId,
@@ -269,7 +283,16 @@ const make = Effect.gen(function* () {
       yield* requestHandoff(threadId, state.pct, String(event.eventId), turnId);
       return;
     }
-    // awaiting-handoff: the first completed turn is the handoff turn
+    // awaiting-handoff: a completion for the PRECEDING turn (a stale
+    // synthetic turn flushed by the handoff dispatch) is not the handoff
+    // turn ending — ignore it and keep waiting
+    if (
+      state.precedingTurnId !== null &&
+      event.turnId !== undefined &&
+      String(event.turnId) === state.precedingTurnId
+    ) {
+      return;
+    }
     if (event.payload.state !== "completed" || !state.markerSeen) {
       states.delete(threadKey);
       yield* appendRecycleActivity({

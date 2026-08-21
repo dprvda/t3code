@@ -249,16 +249,18 @@ describe("ContextRecycleReactor", () => {
           detail,
         },
       });
-    const emitTurnCompleted = (eventId: string, state = "completed") =>
+    const emitTurnCompletedFor = (eventId: string, turnId: string, state = "completed") =>
       emit({
         type: "turn.completed",
         eventId: EventId.make(eventId),
         provider: ProviderDriverKind.make("claudeAgent"),
         createdAt: NOW,
         threadId: THREAD,
-        turnId: TurnId.make("turn-2"),
+        turnId: TurnId.make(turnId),
         payload: { state },
       });
+    const emitTurnCompleted = (eventId: string, state = "completed") =>
+      emitTurnCompletedFor(eventId, "turn-2", state);
 
     const readModel = () => Effect.runPromise(snapshotQuery.getSnapshot());
     const readThread = async () => {
@@ -284,6 +286,7 @@ describe("ContextRecycleReactor", () => {
       emitUsage,
       emitAssistantItem,
       emitTurnCompleted,
+      emitTurnCompletedFor,
     };
   }
 
@@ -319,6 +322,27 @@ describe("ContextRecycleReactor", () => {
     // the session stop went through the engine
     const model = await harness.readModel();
     expect(model.threads.length).toBeGreaterThan(0);
+    expect(await harness.messagesWith(SUCCESSOR_RESUME_PROMPT)).toHaveLength(1);
+  });
+
+  it("a trailing completion of the preceding turn does not abort the pending handoff", async () => {
+    const harness = await createHarness();
+    // crossing arrives carrying the current turn's id (turn-1)
+    await harness.emitUsage("evt-usage-1", 80_000, 100_000);
+    await waitFor(async () => (await harness.messagesWith(STANDARD_HANDOFF_PROMPT)).length > 0);
+    // the handoff dispatch flushes a stale synthetic turn: one more
+    // turn.completed for the OLD turn (turn-1), before the handoff turn ends
+    await harness.emitTurnCompletedFor("evt-phantom", "turn-1");
+    // the real handoff turn produces the marker and completes
+    await harness.emitAssistantItem("evt-marker", HANDOFF_DONE_MARKER);
+    await harness.emitTurnCompleted("evt-handoff-done");
+    await waitFor(async () => (await harness.messagesWith(SUCCESSOR_RESUME_PROMPT)).length > 0);
+    await harness.drain();
+
+    const thread = await harness.readThread();
+    expect(thread.activities.some((entry) => entry.kind === "context-recycle.handoff-failed")).toBe(
+      false,
+    );
     expect(await harness.messagesWith(SUCCESSOR_RESUME_PROMPT)).toHaveLength(1);
   });
 
