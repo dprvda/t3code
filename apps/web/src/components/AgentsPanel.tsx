@@ -29,6 +29,7 @@ import { cn } from "~/lib/utils";
 import { orchestrationEnvironment } from "~/state/orchestration";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { Button } from "~/components/ui/button";
+import { SubagentTranscriptsDialog } from "./SubagentTranscriptsDialog";
 
 /**
  * In-flight states all present as Working (one steady state, per the
@@ -529,6 +530,7 @@ export function AgentsPanel({
   environmentId?: EnvironmentId | null;
   threadId?: ThreadId | null;
 }) {
+  const [transcriptsOpen, setTranscriptsOpen] = useState(false);
   if (!model.hasAgents) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
@@ -576,8 +578,27 @@ export function AgentsPanel({
           {model.idleCount > 0 ? <span>{model.idleCount} idle</span> : null}
           {model.settledCount > 0 ? <span>{model.settledCount} settled</span> : null}
         </span>
-        <span className="tabular-nums">Σ {formatSubagentTokenCount(model.totalTokens)} tok</span>
+        <span className="flex items-center gap-2">
+          {environmentId !== null && threadId !== null ? (
+            <button
+              type="button"
+              className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              onClick={() => setTranscriptsOpen(true)}
+            >
+              transcripts
+            </button>
+          ) : null}
+          <span className="tabular-nums">Σ {formatSubagentTokenCount(model.totalTokens)} tok</span>
+        </span>
       </footer>
+      {environmentId !== null && threadId !== null ? (
+        <SubagentTranscriptsDialog
+          environmentId={environmentId}
+          threadId={threadId}
+          open={transcriptsOpen}
+          onOpenChange={setTranscriptsOpen}
+        />
+      ) : null}
     </div>
   );
 }

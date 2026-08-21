@@ -81,6 +81,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.routerAccountToggle]: AuthOrchestrationOperateScope,
   [WS_METHODS.routerLoginStart]: AuthOrchestrationOperateScope,
   [WS_METHODS.routerLoginStatus]: AuthOrchestrationReadScope,
+  [WS_METHODS.subagentsList]: AuthOrchestrationReadScope,
+  [WS_METHODS.subagentsTranscript]: AuthOrchestrationReadScope,
   [WS_METHODS.projectsListEntries]: AuthOrchestrationReadScope,
   [WS_METHODS.projectsReadFile]: AuthOrchestrationReadScope,
   [WS_METHODS.projectsSearchContents]: AuthOrchestrationReadScope,

@@ -127,6 +127,13 @@ import {
   RouterPoolError,
 } from "./routerPool.ts";
 import {
+  SubagentListInput,
+  SubagentListResult,
+  SubagentTranscriptInput,
+  SubagentTranscriptResult,
+  SubagentViewError,
+} from "./subagents.ts";
+import {
   TerminalAttachInput,
   TerminalAttachStreamEvent,
   TerminalClearInput,
@@ -217,6 +224,10 @@ export const WS_METHODS = {
   routerAccountToggle: "router.accountToggle",
   routerLoginStart: "router.loginStart",
   routerLoginStatus: "router.loginStatus",
+
+  // Subagent transcript methods
+  subagentsList: "subagents.list",
+  subagentsTranscript: "subagents.transcript",
   projectsReadFile: "projects.readFile",
   projectsSearchContents: "projects.searchContents",
   projectsSearchEntries: "projects.searchEntries",
@@ -684,6 +695,18 @@ export const WsRouterLoginStatusRpc = Rpc.make(WS_METHODS.routerLoginStatus, {
   error: Schema.Union([RouterPoolError, EnvironmentAuthorizationError]),
 });
 
+export const WsSubagentsListRpc = Rpc.make(WS_METHODS.subagentsList, {
+  payload: SubagentListInput,
+  success: SubagentListResult,
+  error: Schema.Union([SubagentViewError, EnvironmentAuthorizationError]),
+});
+
+export const WsSubagentsTranscriptRpc = Rpc.make(WS_METHODS.subagentsTranscript, {
+  payload: SubagentTranscriptInput,
+  success: SubagentTranscriptResult,
+  error: Schema.Union([SubagentViewError, EnvironmentAuthorizationError]),
+});
+
 export const WsProjectsReadFileRpc = Rpc.make(WS_METHODS.projectsReadFile, {
   payload: ProjectReadFileInput,
   success: ProjectReadFileResult,
@@ -1079,6 +1102,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsRouterAccountToggleRpc,
   WsRouterLoginStartRpc,
   WsRouterLoginStatusRpc,
+  WsSubagentsListRpc,
+  WsSubagentsTranscriptRpc,
   WsProjectsListEntriesRpc,
   WsProjectsReadFileRpc,
   WsProjectsSearchContentsRpc,

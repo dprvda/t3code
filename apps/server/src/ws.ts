@@ -37,6 +37,7 @@ import {
   type ProjectFileOperation,
   ProjectListEntriesError,
   RouterPoolError,
+  SubagentViewError,
   ProjectReadFileError,
   ProjectSearchContentsError,
   ProjectSearchEntriesError,
@@ -93,6 +94,9 @@ import * as PortScanner from "./preview/PortScanner.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import { docBricks } from "./workspace/docBricks.ts";
 import { makeRouterAccounts, makeRouterLoginRunner } from "./provider/routerAccounts.ts";
+import { claudeSeatConfigDir } from "./orchestration/Layers/ClaudeSeatRotationReactor.ts";
+import { listSubagentRuns, readSubagentTranscript } from "./provider/subagentTranscripts.ts";
+import * as ProviderSessionDirectory from "./provider/Services/ProviderSessionDirectory.ts";
 
 const routerAccountsService = makeRouterAccounts();
 const routerLoginRunner = makeRouterLoginRunner();
@@ -377,6 +381,39 @@ const makeWsRpcLayer = (
       const previewManager = yield* PreviewManager.PreviewManager;
       const portDiscovery = yield* PortScanner.PortDiscovery;
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
+      const providerSessionDirectory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+      // Subagent transcripts live in the Claude config dir's session store;
+      // the thread's session binding names the instance (-> config dir) and cwd.
+      const resolveSubagentStoreContext = Effect.fnUntraced(function* (threadId: ThreadId) {
+        const binding = Option.getOrUndefined(
+          yield* providerSessionDirectory
+            .getBinding(threadId)
+            .pipe(Effect.mapError((cause) => new SubagentViewError({ message: String(cause) }))),
+        );
+        if (binding === undefined || binding.providerInstanceId === undefined) {
+          return yield* new SubagentViewError({
+            message: `thread ${threadId} has no recorded provider session`,
+          });
+        }
+        const runtimePayload = binding.runtimePayload;
+        const cwd =
+          runtimePayload !== null &&
+          typeof runtimePayload === "object" &&
+          !Array.isArray(runtimePayload) &&
+          "cwd" in runtimePayload &&
+          typeof runtimePayload.cwd === "string"
+            ? runtimePayload.cwd
+            : undefined;
+        if (cwd === undefined) {
+          return yield* new SubagentViewError({
+            message: `thread ${threadId} has no recorded workspace directory`,
+          });
+        }
+        const settings = yield* serverSettings.getSettings.pipe(
+          Effect.mapError((cause) => new SubagentViewError({ message: String(cause) })),
+        );
+        return { configDir: claudeSeatConfigDir(settings, binding.providerInstanceId), cwd };
+      });
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
       const config = yield* ServerConfig.ServerConfig;
@@ -1814,6 +1851,44 @@ const makeWsRpcLayer = (
               ),
             ),
             { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.subagentsList]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.subagentsList,
+            Effect.gen(function* () {
+              const context = yield* resolveSubagentStoreContext(input.threadId);
+              return {
+                runs: yield* Effect.try({
+                  try: () => listSubagentRuns(context.configDir, context.cwd),
+                  catch: (cause) => new SubagentViewError({ message: String(cause) }),
+                }),
+              };
+            }),
+            { "rpc.aggregate": "subagents" },
+          ),
+        [WS_METHODS.subagentsTranscript]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.subagentsTranscript,
+            Effect.gen(function* () {
+              const context = yield* resolveSubagentStoreContext(input.threadId);
+              const blocks = yield* Effect.try({
+                try: () =>
+                  readSubagentTranscript(
+                    context.configDir,
+                    context.cwd,
+                    input.parentSessionId,
+                    input.agentFileId,
+                  ),
+                catch: (cause) => new SubagentViewError({ message: String(cause) }),
+              });
+              if (blocks === null) {
+                return yield* new SubagentViewError({
+                  message: `transcript not found for ${input.agentFileId}`,
+                });
+              }
+              return { blocks };
+            }),
+            { "rpc.aggregate": "subagents" },
           ),
         [WS_METHODS.routerAccounts]: (input) =>
           observeRpcEffect(

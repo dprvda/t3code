@@ -154,6 +154,10 @@
     "./state/routerPool": {
       "types": "./src/state/routerPool.ts",
       "default": "./src/state/routerPool.ts"
+    },
+    "./state/subagentView": {
+      "types": "./src/state/subagentView.ts",
+      "default": "./src/state/subagentView.ts"
     }
   },
   "scripts": {
