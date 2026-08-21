@@ -76,6 +76,36 @@ function lastAssistantLine(detail: EnvironmentThread | null): string | null {
   return null;
 }
 
+/**
+ * Live output tail for a working cell: the trailing lines of the newest
+ * assistant message (streaming text included) plus the latest tool call, so
+ * the wall reads like a bank of running agents.
+ */
+function outputTail(detail: EnvironmentThread | null): string[] {
+  if (detail === null) return [];
+  const lines: string[] = [];
+  for (let index = detail.activities.length - 1; index >= 0; index -= 1) {
+    const activity = detail.activities[index];
+    if (activity === undefined || !activity.kind.startsWith("tool.")) continue;
+    const payload = activity.payload as { detail?: unknown } | null;
+    const detailText = typeof payload?.detail === "string" ? payload.detail : activity.summary;
+    lines.push(`▸ ${detailText.split("\n")[0] ?? ""}`);
+    break;
+  }
+  for (let index = detail.messages.length - 1; index >= 0; index -= 1) {
+    const message = detail.messages[index];
+    if (message?.role !== "assistant") continue;
+    const tail = message.text
+      .split("\n")
+      .map((entry) => entry.trimEnd())
+      .filter((entry) => entry.trim().length > 0)
+      .slice(-4);
+    lines.push(...tail);
+    break;
+  }
+  return lines.slice(-5);
+}
+
 function contextBarClass(pct: number): string {
   if (pct >= 75) return "bg-red-500/80";
   if (pct >= 50) return "bg-amber-500/80";
@@ -154,9 +184,24 @@ function ThreadCell({
           {projectTitle} · {shell.modelSelection.model}
         </div>
       </div>
-      <div className="line-clamp-2 min-h-8 text-secondary-label text-xs">
-        {lastLine ?? (detail === null ? "…" : "No assistant output yet.")}
-      </div>
+      {pill.pulse ? (
+        <div className="min-h-16 overflow-hidden rounded-md bg-muted/40 px-2 py-1.5 font-mono text-[10px] leading-4 text-secondary-label">
+          {(() => {
+            const tail = outputTail(detail);
+            return tail.length > 0
+              ? tail.map((line, index) => (
+                  <div key={index} className="truncate">
+                    {line}
+                  </div>
+                ))
+              : "…";
+          })()}
+        </div>
+      ) : (
+        <div className="line-clamp-2 min-h-8 text-secondary-label text-xs">
+          {lastLine ?? (detail === null ? "…" : "No assistant output yet.")}
+        </div>
+      )}
       <div className="mt-auto flex items-center gap-2">
         <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
           {pct !== null ? (
