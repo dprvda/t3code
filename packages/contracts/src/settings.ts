@@ -392,6 +392,15 @@ export const ClaudeSettings = makeProviderSettingsSchema(
         providerSettingsForm: { placeholder: "", clearWhenEmpty: "omit" },
       }),
     ),
+    contextWindowTokens: Schema.Int.pipe(
+      Schema.withDecodingDefault(Effect.succeed(0)),
+      Schema.annotateKey({
+        title: "Context window tokens",
+        description:
+          "Claude Code's context budget for this instance (CLAUDE_CODE_MAX_CONTEXT_TOKENS). 0 keeps the provider default. 1000000 enables the Codex 1M window on routed models.",
+        providerSettingsForm: { placeholder: "0", clearWhenEmpty: "omit" },
+      }),
+    ),
     customModels: Schema.Array(Schema.String).pipe(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
@@ -409,7 +418,7 @@ export const ClaudeSettings = makeProviderSettingsSchema(
     ),
   },
   {
-    order: ["binaryPath", "homePath", "continuationGroup", "launchArgs"],
+    order: ["binaryPath", "homePath", "continuationGroup", "contextWindowTokens", "launchArgs"],
   },
 );
 export type ClaudeSettings = typeof ClaudeSettings.Type;
@@ -549,9 +558,14 @@ export type SourceControlWritingStyleMode = typeof SourceControlWritingStyleMode
  */
 export const ContextRecycleSettings = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
-  thresholdPct: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })).pipe(
-    Schema.withDecodingDefault(Effect.succeed(75)),
-  ),
+  /**
+   * Absolute token threshold: recycle once a session's used tokens cross it.
+   * A fixed 90% -of-window fallback still protects models whose window is
+   * smaller than this threshold.
+   */
+  thresholdTokens: Schema.Int.check(
+    Schema.isBetween({ minimum: 100_000, maximum: 1_000_000 }),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed(600_000))),
 });
 export type ContextRecycleSettings = typeof ContextRecycleSettings.Type;
 
@@ -808,6 +822,7 @@ const ClaudeSettingsPatch = Schema.Struct({
   binaryPath: Schema.optionalKey(TrimmedString),
   homePath: Schema.optionalKey(TrimmedString),
   continuationGroup: Schema.optionalKey(TrimmedString),
+  contextWindowTokens: Schema.optionalKey(Schema.Int),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
   launchArgs: Schema.optionalKey(TrimmedString),
 });
@@ -864,7 +879,7 @@ export const ServerSettingsPatch = Schema.Struct({
   contextRecycle: Schema.optionalKey(
     Schema.Struct({
       enabled: Schema.optionalKey(Schema.Boolean),
-      thresholdPct: Schema.optionalKey(Schema.Int),
+      thresholdTokens: Schema.optionalKey(Schema.Int),
     }),
   ),
   observability: Schema.optionalKey(

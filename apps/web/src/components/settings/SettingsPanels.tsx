@@ -1619,6 +1619,38 @@ function FontFamilySettingsRow({
 
 const AUTO_SETTLE_DEFAULT_DAYS = DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays ?? 3;
 
+function ContextRecycleThresholdSlider({
+  value,
+  onCommit,
+}: {
+  readonly value: number;
+  readonly onCommit: (thresholdTokens: number) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  return (
+    <div className="flex w-full items-center gap-3 sm:w-64">
+      <input
+        type="range"
+        min={300_000}
+        max={900_000}
+        step={50_000}
+        value={draft}
+        onChange={(changeEvent) => setDraft(Number(changeEvent.target.value))}
+        onPointerUp={() => onCommit(draft)}
+        onKeyUp={(keyEvent) => {
+          if (keyEvent.key === "ArrowLeft" || keyEvent.key === "ArrowRight") onCommit(draft);
+        }}
+        aria-label="Recycle threshold in tokens"
+        className="min-w-0 flex-1 accent-primary"
+      />
+      <span className="w-12 shrink-0 text-right text-secondary-label text-xs tabular-nums">
+        {Math.round(draft / 1000)}k
+      </span>
+    </div>
+  );
+}
+
 function AutoSettleDaysInput({
   value,
   onCommit,
@@ -1941,6 +1973,34 @@ export function GeneralSettingsPanel() {
               <AutoSettleDaysInput
                 value={settings.sidebarAutoSettleAfterDays}
                 onCommit={(days) => updateSettings({ sidebarAutoSettleAfterDays: days })}
+              />
+            }
+          />
+        ) : null}
+
+        <SettingsRow
+          title="Automatic context recycle"
+          description="At the token threshold, ask the agent for a handoff and restart the session fresh from it. A 90%-of-window fallback still protects smaller models."
+          control={
+            <Switch
+              checked={settings.contextRecycle.enabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ contextRecycle: { enabled: Boolean(checked) } })
+              }
+              aria-label="Automatic context recycle"
+            />
+          }
+        />
+        {settings.contextRecycle.enabled ? (
+          <SettingsRow
+            title="Recycle threshold"
+            description="Used tokens at which the handoff is requested."
+            control={
+              <ContextRecycleThresholdSlider
+                value={settings.contextRecycle.thresholdTokens}
+                onCommit={(thresholdTokens) =>
+                  updateSettings({ contextRecycle: { thresholdTokens } })
+                }
               />
             }
           />

@@ -20,7 +20,9 @@ it.layer(NodeServices.layer)("ClaudeHome", (it) => {
         const resolved = path.resolve(NodeOS.homedir());
 
         expect(yield* resolveClaudeHomePath({ homePath: "" })).toBe(resolved);
-        expect(yield* makeClaudeEnvironment({ homePath: "" })).toBe(process.env);
+        expect(yield* makeClaudeEnvironment({ homePath: "", contextWindowTokens: 0 })).toBe(
+          process.env,
+        );
       }),
     );
 
@@ -31,7 +33,9 @@ it.layer(NodeServices.layer)("ClaudeHome", (it) => {
         const resolved = path.resolve(NodeOS.homedir(), ".claude-work");
 
         expect(yield* resolveClaudeHomePath({ homePath })).toBe(resolved);
-        expect((yield* makeClaudeEnvironment({ homePath })).CLAUDE_CONFIG_DIR).toBe(resolved);
+        expect(
+          (yield* makeClaudeEnvironment({ homePath, contextWindowTokens: 0 })).CLAUDE_CONFIG_DIR,
+        ).toBe(resolved);
         expect(yield* makeClaudeContinuationGroupKey({ homePath, continuationGroup: "" })).toBe(
           `claude:home:${resolved}`,
         );
@@ -58,6 +62,18 @@ it.layer(NodeServices.layer)("ClaudeHome", (it) => {
         expect(yield* makeClaudeContinuationGroupKey({ homePath: "", continuationGroup: "" })).toBe(
           `claude:home:${resolved}`,
         );
+      }),
+    );
+
+    it.effect("contextWindowTokens injects the Claude Code context budget", () =>
+      Effect.gen(function* () {
+        const env = yield* makeClaudeEnvironment({
+          homePath: "~/.claude-router",
+          contextWindowTokens: 1_000_000,
+        });
+        expect(env.CLAUDE_CODE_MAX_CONTEXT_TOKENS).toBe("1000000");
+        const untouched = yield* makeClaudeEnvironment({ homePath: "", contextWindowTokens: 0 });
+        expect(untouched).toBe(process.env);
       }),
     );
 

@@ -15,15 +15,25 @@ export const resolveClaudeHomePath = Effect.fn("resolveClaudeHomePath")(function
 });
 
 export const makeClaudeEnvironment = Effect.fn("makeClaudeEnvironment")(function* (
-  config: Pick<ClaudeSettings, "homePath">,
+  config: Pick<ClaudeSettings, "homePath" | "contextWindowTokens">,
   baseEnv?: NodeJS.ProcessEnv,
 ): Effect.fn.Return<NodeJS.ProcessEnv, never, Path.Path> {
   const resolvedBaseEnv = baseEnv ?? process.env;
   const homePath = config.homePath.trim();
-  if (homePath.length === 0) return resolvedBaseEnv;
+  // Explicit context budget (e.g. the Codex 1M window on routed models):
+  // Claude Code takes this as the window for models it doesn't recognize.
+  const contextEnv =
+    config.contextWindowTokens > 0
+      ? { CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(config.contextWindowTokens) }
+      : null;
+  if (homePath.length === 0) {
+    // zero config = zero touch: callers rely on getting the base env back as-is
+    return contextEnv === null ? resolvedBaseEnv : { ...resolvedBaseEnv, ...contextEnv };
+  }
   const resolvedHomePath = yield* resolveClaudeHomePath(config);
   return {
     ...resolvedBaseEnv,
+    ...contextEnv,
     // Isolate this instance's config via CLAUDE_CONFIG_DIR rather than HOME.
     // Overriding HOME also relocates the macOS login keychain lookup
     // ($HOME/Library/Keychains), so the spawned CLI can't find its stored

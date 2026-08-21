@@ -107,7 +107,7 @@ describe("ContextRecycleReactor", () => {
   });
 
   async function createHarness(input?: {
-    readonly thresholdPct?: number;
+    readonly thresholdTokens?: number;
     readonly enabled?: boolean;
   }) {
     const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-recycle-"));
@@ -158,7 +158,7 @@ describe("ContextRecycleReactor", () => {
     const settingsLayer = ServerSettingsService.layerTest({
       contextRecycle: {
         enabled: input?.enabled ?? true,
-        thresholdPct: input?.thresholdPct ?? 75,
+        thresholdTokens: input?.thresholdTokens ?? 600_000,
       },
     });
     const layer = ContextRecycleReactorLive.pipe(
@@ -292,7 +292,7 @@ describe("ContextRecycleReactor", () => {
 
   it("crossing the threshold on an idle thread requests a handoff turn", async () => {
     const harness = await createHarness();
-    await harness.emitUsage("evt-usage-1", 80_000, 100_000); // 80% >= 75%
+    await harness.emitUsage("evt-usage-1", 700_000, 1_000_000); // >= 600k tokens
     await waitFor(async () => (await harness.messagesWith(STANDARD_HANDOFF_PROMPT)).length > 0);
     await harness.drain();
 
@@ -305,7 +305,7 @@ describe("ContextRecycleReactor", () => {
 
   it("marker + handoff completion recycles: stop, cleared cursor, successor turn", async () => {
     const harness = await createHarness();
-    await harness.emitUsage("evt-usage-1", 80_000, 100_000);
+    await harness.emitUsage("evt-usage-1", 700_000, 1_000_000);
     await waitFor(async () => (await harness.messagesWith(STANDARD_HANDOFF_PROMPT)).length > 0);
     await harness.emitAssistantItem(
       "evt-marker",
@@ -328,7 +328,7 @@ describe("ContextRecycleReactor", () => {
   it("a trailing completion of the preceding turn does not abort the pending handoff", async () => {
     const harness = await createHarness();
     // crossing arrives carrying the current turn's id (turn-1)
-    await harness.emitUsage("evt-usage-1", 80_000, 100_000);
+    await harness.emitUsage("evt-usage-1", 700_000, 1_000_000);
     await waitFor(async () => (await harness.messagesWith(STANDARD_HANDOFF_PROMPT)).length > 0);
     // the handoff dispatch flushes a stale synthetic turn: one more
     // turn.completed for the OLD turn (turn-1), before the handoff turn ends
@@ -348,7 +348,7 @@ describe("ContextRecycleReactor", () => {
 
   it("handoff turn without the marker aborts the recycle", async () => {
     const harness = await createHarness();
-    await harness.emitUsage("evt-usage-1", 80_000, 100_000);
+    await harness.emitUsage("evt-usage-1", 700_000, 1_000_000);
     await waitFor(async () => (await harness.messagesWith(STANDARD_HANDOFF_PROMPT)).length > 0);
     await harness.emitAssistantItem("evt-chatter", "I could not write the handoff, sorry.");
     await harness.emitTurnCompleted("evt-handoff-done");
@@ -366,7 +366,7 @@ describe("ContextRecycleReactor", () => {
 
   it("below-threshold usage and disabled recycling never act", async () => {
     const harness = await createHarness({ enabled: false });
-    await harness.emitUsage("evt-usage-off", 90_000, 100_000);
+    await harness.emitUsage("evt-usage-off", 950_000, 1_000_000);
     // FIFO probe: a benign turn completion after the usage event proves processing
     await harness.emitTurnCompleted("evt-probe");
     await harness.drain();
@@ -378,9 +378,9 @@ describe("ContextRecycleReactor", () => {
       scope = null;
       await runtime!.dispose();
       runtime = null;
-      return createHarness({ thresholdPct: 75 });
+      return createHarness({ thresholdTokens: 600_000 });
     })();
-    await harness2.emitUsage("evt-usage-low", 50_000, 100_000);
+    await harness2.emitUsage("evt-usage-low", 200_000, 1_000_000);
     await harness2.emitTurnCompleted("evt-probe-2");
     await harness2.drain();
     expect(await harness2.messagesWith(STANDARD_HANDOFF_PROMPT)).toHaveLength(0);
@@ -422,18 +422,18 @@ describe("ContextRecycleReactor", () => {
 
   it("trailing high-usage snapshots after a recycle do not re-trigger until usage drops", async () => {
     const harness = await createHarness();
-    await harness.emitUsage("evt-usage-1", 80_000, 100_000);
+    await harness.emitUsage("evt-usage-1", 700_000, 1_000_000);
     await waitFor(async () => (await harness.messagesWith(STANDARD_HANDOFF_PROMPT)).length > 0);
     await harness.emitAssistantItem("evt-marker", HANDOFF_DONE_MARKER);
     await harness.emitTurnCompleted("evt-handoff-done");
     await waitFor(async () => (await harness.messagesWith(SUCCESSOR_RESUME_PROMPT)).length > 0);
 
     // trailing snapshot from the old session, still above threshold
-    await harness.emitUsage("evt-usage-trailing", 82_000, 100_000);
+    await harness.emitUsage("evt-usage-trailing", 820_000, 1_000_000);
     // fresh session reports low usage — watching resumes
-    await harness.emitUsage("evt-usage-fresh", 10_000, 100_000);
+    await harness.emitUsage("evt-usage-fresh", 100_000, 1_000_000);
     // and a later real crossing recycles again
-    await harness.emitUsage("evt-usage-2", 90_000, 100_000);
+    await harness.emitUsage("evt-usage-2", 900_000, 1_000_000);
     await waitFor(async () => (await harness.messagesWith(STANDARD_HANDOFF_PROMPT)).length >= 2);
     await harness.drain();
 

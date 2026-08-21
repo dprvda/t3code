@@ -179,7 +179,7 @@ const make = Effect.gen(function* () {
       summary:
         pct < 0
           ? "Manual recycle — requesting handoff"
-          : `Context at ${Math.round(pct)}% — requesting handoff`,
+          : `Context at ${Math.round(pct / 1000)}k tokens — requesting handoff`,
       payload: { pct },
       createdAt: yield* nowIso,
     });
@@ -264,23 +264,27 @@ const make = Effect.gen(function* () {
       );
       if (settings === undefined || !settings.contextRecycle.enabled) return;
       const { usedTokens, maxTokens } = event.payload.usage;
-      if (maxTokens === undefined || maxTokens <= 0 || usedTokens <= 0) return;
-      const pct = (usedTokens / maxTokens) * 100;
+      if (usedTokens === undefined || usedTokens <= 0) return;
+      // Absolute token threshold, plus a fixed 90%-of-window fallback so
+      // models with windows smaller than the threshold still recycle.
+      const overThreshold =
+        usedTokens >= settings.contextRecycle.thresholdTokens ||
+        (maxTokens !== undefined && maxTokens > 0 && usedTokens / maxTokens >= 0.9);
       const existing = states.get(threadKey);
       if (existing?.phase === "cooldown") {
-        if (pct < settings.contextRecycle.thresholdPct) states.delete(threadKey);
+        if (!overThreshold) states.delete(threadKey);
         return;
       }
       if (existing !== undefined) return;
-      if (pct < settings.contextRecycle.thresholdPct) return;
+      if (!overThreshold) return;
       const thread = yield* resolveThread(threadId);
       if (!thread) return;
       if (thread.latestTurn?.state === "running") {
         // can't inject a turn mid-turn: arm, fire on the turn boundary
-        states.set(threadKey, { phase: "armed", pct });
+        states.set(threadKey, { phase: "armed", pct: usedTokens });
         return;
       }
-      yield* requestHandoff(threadId, pct, String(event.eventId), turnId);
+      yield* requestHandoff(threadId, usedTokens, String(event.eventId), turnId);
       return;
     }
 
