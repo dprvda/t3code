@@ -114,10 +114,10 @@ describe("readSubagentTranscript", () => {
     ]);
     const blocks = readSubagentTranscript(null, CWD, "session-a", "agent-ccc3", home);
     expect(blocks).toEqual([
-      { role: "user", text: "Do the thing." },
-      { role: "tool", text: '▸ Bash: {"command":"ls"}' },
-      { role: "tool", text: "⬑ file-a\nfile-b" },
-      { role: "assistant", text: "Done." },
+      { role: "user", text: "Do the thing.", kind: "text" },
+      { role: "tool", text: "Bash: ls", kind: "tool_use", toolName: "Bash", command: "ls" },
+      { role: "tool", text: "file-a\nfile-b", kind: "tool_result" },
+      { role: "assistant", text: "Done.", kind: "text" },
     ]);
   });
 
@@ -138,5 +138,117 @@ describe("readSubagentTranscript", () => {
         message: { role: "assistant", content: [{ type: "thinking", thinking: "secret" }] },
       }),
     ).toEqual([]);
+  });
+});
+
+describe("blocksFromLine structured output", () => {
+  it("maps Edit tool_use to a fileEdit block with a readable caption and timestamp", () => {
+    expect(
+      blocksFromLine({
+        type: "assistant",
+        timestamp: "2026-08-22T10:00:00.000Z",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu_1",
+              name: "Edit",
+              input: { file_path: "/repo/a.ts", old_string: "x", new_string: "y" },
+            },
+          ],
+        },
+      }),
+    ).toEqual([
+      {
+        role: "tool",
+        text: "Edit: /repo/a.ts",
+        at: "2026-08-22T10:00:00.000Z",
+        kind: "tool_use",
+        toolName: "Edit",
+        toolUseId: "toolu_1",
+        fileEdit: { path: "/repo/a.ts", oldText: "x", newText: "y" },
+      },
+    ]);
+  });
+
+  it("maps Write tool_use to a whole-file fileEdit", () => {
+    expect(
+      blocksFromLine({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu_2",
+              name: "Write",
+              input: { file_path: "/repo/b.md", content: "hello" },
+            },
+          ],
+        },
+      }),
+    ).toEqual([
+      {
+        role: "tool",
+        text: "Write: /repo/b.md",
+        kind: "tool_use",
+        toolName: "Write",
+        toolUseId: "toolu_2",
+        fileEdit: { path: "/repo/b.md", oldText: "", newText: "hello" },
+      },
+    ]);
+  });
+
+  it("pairs tool_result with its call via toolUseId; multi-line commands keep only line one in the caption", () => {
+    expect(
+      blocksFromLine({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "tool_use", id: "toolu_3", name: "Bash", input: { command: "ls -la\nwc -l" } },
+          ],
+        },
+      }),
+    ).toEqual([
+      {
+        role: "tool",
+        text: "Bash: ls -la",
+        kind: "tool_use",
+        toolName: "Bash",
+        toolUseId: "toolu_3",
+        command: "ls -la\nwc -l",
+      },
+    ]);
+    expect(
+      blocksFromLine({
+        type: "user",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "toolu_3", content: "total 0" }],
+        },
+      }),
+    ).toEqual([{ role: "tool", text: "total 0", kind: "tool_result", toolUseId: "toolu_3" }]);
+  });
+
+  it("unknown tools fall back to a compact input preview", () => {
+    expect(
+      blocksFromLine({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "toolu_4", name: "Mystery", input: { alpha: 1 } }],
+        },
+      }),
+    ).toEqual([
+      {
+        role: "tool",
+        text: 'Mystery: {"alpha":1}',
+        kind: "tool_use",
+        toolName: "Mystery",
+        toolUseId: "toolu_4",
+      },
+    ]);
   });
 });

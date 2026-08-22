@@ -5,8 +5,9 @@ import type {
 } from "@t3tools/client-runtime/state/models";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { CircleCheckIcon, HandIcon, RecycleIcon, UndoDotIcon } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
+import { ThreadTimelineView } from "../components/chat/ThreadTimelineView";
 import { resolveThreadStatusPill, type ThreadStatusPill } from "../components/Sidebar.logic";
 import { SidebarInset } from "../components/ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
@@ -103,53 +104,6 @@ function contextUsagePct(detail: EnvironmentThread | null): number | null {
   return null;
 }
 
-type FeedBlock = {
-  readonly key: string;
-  readonly kind: "user" | "assistant" | "tool";
-  readonly text: string;
-  readonly at: string;
-};
-
-/**
- * The pane feed: every user and assistant message (streaming included)
- * interleaved with tool calls, oldest first — the session's whole life, the
- * way ADE's terminal wall showed it.
- */
-function buildFeed(detail: EnvironmentThread | null): FeedBlock[] {
-  if (detail === null) return [];
-  const blocks: FeedBlock[] = [];
-  for (const message of detail.messages) {
-    if (message.role !== "user" && message.role !== "assistant") continue;
-    if (message.text.trim().length === 0) continue;
-    blocks.push({
-      key: `m:${message.id}`,
-      kind: message.role,
-      text: message.text,
-      at: message.createdAt,
-    });
-  }
-  // one line per tool call, latest state wins
-  const toolBlocks = new Map<string, FeedBlock>();
-  for (const activity of detail.activities) {
-    if (!activity.kind.startsWith("tool.")) continue;
-    const payload = activity.payload as { toolCallId?: unknown; detail?: unknown } | null;
-    const callKey =
-      typeof payload?.toolCallId === "string" ? payload.toolCallId : String(activity.id);
-    const text = typeof payload?.detail === "string" ? payload.detail : activity.summary;
-    const existing = toolBlocks.get(callKey);
-    toolBlocks.set(callKey, {
-      key: `t:${callKey}`,
-      kind: "tool",
-      text: `▸ ${text.split("\n")[0] ?? ""}`,
-      // keep the first-seen timestamp so the call stays in stream order
-      at: existing?.at ?? activity.createdAt,
-    });
-  }
-  blocks.push(...toolBlocks.values());
-  blocks.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
-  return blocks.slice(-120);
-}
-
 function SessionPane({
   shell,
   projectTitle,
@@ -170,18 +124,7 @@ function SessionPane({
   const needsYou =
     shell.hasPendingApprovals || shell.hasPendingUserInput || shell.hasActionableProposedPlan;
   const isSettled = shell.settledAt !== null || shell.settledOverride === "settled";
-  const feed = useMemo(() => buildFeed(detail), [detail]);
   const [draft, setDraft] = useState("");
-
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const stickRef = useRef(true);
-  const feedSize = feed.reduce((sum, block) => sum + block.text.length, 0);
-  useEffect(() => {
-    const body = bodyRef.current;
-    if (body !== null && stickRef.current) {
-      body.scrollTop = body.scrollHeight;
-    }
-  }, [feedSize]);
 
   const send = () => {
     const text = draft.trim();
@@ -284,33 +227,9 @@ function SessionPane({
           <TooltipPopup side="top">Recycle: handoff, then a fresh session</TooltipPopup>
         </Tooltip>
       </div>
-      {/* live session feed */}
-      <div
-        ref={bodyRef}
-        onScroll={() => {
-          const body = bodyRef.current;
-          if (body === null) return;
-          stickRef.current = body.scrollHeight - body.scrollTop - body.clientHeight < 48;
-        }}
-        className="min-h-0 flex-1 space-y-1.5 overflow-y-auto bg-muted/30 px-2.5 py-2 font-mono text-[11px] leading-4"
-      >
-        {feed.length === 0 ? (
-          <div className="text-secondary-label">{detail === null ? "…" : "No output yet."}</div>
-        ) : (
-          feed.map((block) => (
-            <div
-              key={block.key}
-              className={cn(
-                "whitespace-pre-wrap break-words",
-                block.kind === "user" && "text-sky-700 dark:text-sky-300/90",
-                block.kind === "assistant" && "text-foreground/90",
-                block.kind === "tool" && "text-secondary-label",
-              )}
-            >
-              {block.kind === "user" ? `❯ ${block.text}` : block.text}
-            </div>
-          ))
-        )}
+      {/* live session timeline — the main chat's exact rendering */}
+      <div className="min-h-0 flex-1 overflow-hidden bg-muted/30">
+        <ThreadTimelineView environmentId={shell.environmentId} threadId={shell.id} />
       </div>
       {/* per-pane composer */}
       <div className="flex shrink-0 items-center gap-1.5 border-border border-t px-2.5 py-1.5">

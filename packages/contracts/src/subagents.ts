@@ -21,6 +21,19 @@ export type SubagentRunSummary = typeof SubagentRunSummary.Type;
 export const SubagentTranscriptBlock = Schema.Struct({
   role: Schema.Literals(["user", "assistant", "tool"]),
   text: Schema.String,
+  // Additive (older servers omit them): structure for timeline-grade rendering.
+  at: Schema.optional(Schema.String),
+  kind: Schema.optional(Schema.Literals(["text", "tool_use", "tool_result"])),
+  toolName: Schema.optional(Schema.String),
+  toolUseId: Schema.optional(Schema.String),
+  command: Schema.optional(Schema.String),
+  fileEdit: Schema.optional(
+    Schema.Struct({
+      path: Schema.String,
+      oldText: Schema.String,
+      newText: Schema.String,
+    }),
+  ),
 });
 export type SubagentTranscriptBlock = typeof SubagentTranscriptBlock.Type;
 

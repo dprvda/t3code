@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "~/lib/utils";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 
+import { SubagentTimelineView } from "./chat/ThreadTimelineView";
 import { subagentViewEnvironment } from "../state/subagentView";
 import { useThreadShell } from "../state/entities";
 import { threadEnvironment } from "../state/threads";
@@ -159,31 +160,25 @@ export function SubagentTranscriptsDialog({
               )}
             </div>
           </ScrollArea>
-          <ScrollArea className="min-w-0 flex-1 rounded-md border border-border bg-muted/30">
-            <div className="space-y-2 p-3 font-mono text-[11px] leading-4">
-              {selected === null ? (
-                <div className="text-secondary-label">Pick a run on the left.</div>
-              ) : blocks === null ? (
-                <div className="text-secondary-label">Loading transcript…</div>
-              ) : blocks.length === 0 ? (
-                <div className="text-secondary-label">Transcript is empty or unavailable.</div>
-              ) : (
-                blocks.map((block, index) => (
-                  <div
-                    key={index}
-                    className={cn(
-                      "whitespace-pre-wrap break-words",
-                      block.role === "user" && "text-sky-700 dark:text-sky-300/90",
-                      block.role === "assistant" && "text-foreground/90",
-                      block.role === "tool" && "text-secondary-label",
-                    )}
-                  >
-                    {block.role === "user" ? `❯ ${block.text}` : block.text}
-                  </div>
-                ))
-              )}
-            </div>
-          </ScrollArea>
+          {/* Transcript pane: the main chat's exact timeline rendering; the
+              timeline owns its scrolling, so no ScrollArea wrapper here. */}
+          <div className="min-w-0 flex-1 overflow-hidden rounded-md border border-border bg-muted/30">
+            {selected === null ? (
+              <div className="p-3 text-secondary-label text-xs">Pick a run on the left.</div>
+            ) : blocks === null ? (
+              <div className="p-3 text-secondary-label text-xs">Loading transcript…</div>
+            ) : blocks.length === 0 ? (
+              <div className="p-3 text-secondary-label text-xs">
+                Transcript is empty or unavailable.
+              </div>
+            ) : (
+              <SubagentTimelineView
+                environmentId={environmentId}
+                transcriptKey={`${selected.parentSessionId}:${selected.id}`}
+                blocks={blocks}
+              />
+            )}
+          </div>
         </div>
         {selected !== null ? (
           <div className="flex shrink-0 items-center gap-2 border-border border-t pt-2">

@@ -28,6 +28,16 @@ export type SubagentRunSummary = {
 export type SubagentTranscriptBlock = {
   readonly role: "user" | "assistant" | "tool";
   readonly text: string;
+  /** ISO timestamp of the source JSONL line, when the line carried one. */
+  readonly at?: string;
+  readonly kind?: "text" | "tool_use" | "tool_result";
+  readonly toolName?: string;
+  /** Pairs a tool_use with its tool_result across lines. */
+  readonly toolUseId?: string;
+  /** Bash-style tools: the full command, for the timeline's command rows. */
+  readonly command?: string;
+  /** File-mutation tools (Edit/Write): the structured diff payload. */
+  readonly fileEdit?: { readonly path: string; readonly oldText: string; readonly newText: string };
 };
 
 const AGENT_FILE_RE = /^agent-[A-Za-z0-9]+$/;
@@ -100,6 +110,7 @@ export function listSubagentRuns(
 
 type SessionLine = {
   type?: string;
+  timestamp?: string;
   message?: {
     role?: string;
     content?: unknown;
@@ -110,23 +121,80 @@ function clip(text: string): string {
   return text.length > MAX_BLOCK_CHARS ? `${text.slice(0, MAX_BLOCK_CHARS)}\n… [clipped]` : text;
 }
 
+/** Readable one-line caption for a tool call, matching the chat's vocabulary. */
+function toolCaption(name: string, input: Record<string, unknown>): string {
+  const path = typeof input["file_path"] === "string" ? input["file_path"] : null;
+  if (path !== null && (name === "Edit" || name === "Write" || name === "Read")) {
+    return `${name}: ${path}`;
+  }
+  if (typeof input["command"] === "string") {
+    return `${name}: ${input["command"].split("\n")[0] ?? ""}`;
+  }
+  if (typeof input["pattern"] === "string") {
+    return `${name}: ${input["pattern"]}`;
+  }
+  const compact = JSON.stringify(input);
+  return compact === "{}" ? name : `${name}: ${clipTo(compact, 200)}`;
+}
+
+function clipTo(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
 /** Flatten one session-JSONL line's content into display blocks. */
 export function blocksFromLine(line: SessionLine): SubagentTranscriptBlock[] {
   if (line.type !== "user" && line.type !== "assistant") return [];
   const role = line.type;
+  const at = typeof line.timestamp === "string" ? line.timestamp : undefined;
+  const stamp = <T extends SubagentTranscriptBlock>(block: T): T =>
+    at === undefined ? block : { ...block, at };
   const content = line.message?.content;
   if (typeof content === "string") {
-    return content.trim().length > 0 ? [{ role, text: clip(content) }] : [];
+    return content.trim().length > 0 ? [stamp({ role, text: clip(content), kind: "text" })] : [];
   }
   if (!Array.isArray(content)) return [];
   const blocks: SubagentTranscriptBlock[] = [];
   for (const part of content as Array<Record<string, unknown>>) {
     if (part["type"] === "text" && typeof part["text"] === "string" && part["text"].trim()) {
-      blocks.push({ role, text: clip(part["text"]) });
+      blocks.push(stamp({ role, text: clip(part["text"]), kind: "text" }));
     } else if (part["type"] === "tool_use") {
       const name = typeof part["name"] === "string" ? part["name"] : "tool";
-      const input = JSON.stringify(part["input"] ?? {});
-      blocks.push({ role: "tool", text: clip(`▸ ${name}: ${input}`) });
+      const input =
+        part["input"] !== null && typeof part["input"] === "object"
+          ? (part["input"] as Record<string, unknown>)
+          : {};
+      const toolUseId = typeof part["id"] === "string" ? part["id"] : undefined;
+      const block: SubagentTranscriptBlock = stamp({
+        role: "tool",
+        text: clip(toolCaption(name, input)),
+        kind: "tool_use",
+        toolName: name,
+        ...(toolUseId !== undefined ? { toolUseId } : {}),
+      });
+      const filePath = typeof input["file_path"] === "string" ? input["file_path"] : null;
+      if (name === "Edit" && filePath !== null) {
+        blocks.push({
+          ...block,
+          fileEdit: {
+            path: filePath,
+            oldText: typeof input["old_string"] === "string" ? input["old_string"] : "",
+            newText: typeof input["new_string"] === "string" ? input["new_string"] : "",
+          },
+        });
+      } else if (name === "Write" && filePath !== null) {
+        blocks.push({
+          ...block,
+          fileEdit: {
+            path: filePath,
+            oldText: "",
+            newText: typeof input["content"] === "string" ? input["content"] : "",
+          },
+        });
+      } else if (typeof input["command"] === "string") {
+        blocks.push({ ...block, command: clip(input["command"]) });
+      } else {
+        blocks.push(block);
+      }
     } else if (part["type"] === "tool_result") {
       const raw = part["content"];
       const text =
@@ -141,7 +209,17 @@ export function blocksFromLine(line: SessionLine): SubagentTranscriptBlock[] {
                 )
                 .join("\n")
             : "";
-      if (text.trim().length > 0) blocks.push({ role: "tool", text: clip(`⬑ ${text}`) });
+      const toolUseId = typeof part["tool_use_id"] === "string" ? part["tool_use_id"] : undefined;
+      if (text.trim().length > 0) {
+        blocks.push(
+          stamp({
+            role: "tool",
+            text: clip(text),
+            kind: "tool_result",
+            ...(toolUseId !== undefined ? { toolUseId } : {}),
+          }),
+        );
+      }
     }
   }
   return blocks;
