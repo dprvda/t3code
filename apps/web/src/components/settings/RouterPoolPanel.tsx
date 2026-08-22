@@ -206,10 +206,30 @@ function ClaudeSeatsSection({ environmentId }: { readonly environmentId: Environ
   );
 
   useEffect(() => {
-    refresh();
+    // Commands fail fast while the environment ws is still connecting (the
+    // old SWR query atoms waited instead) — retry quickly until the first
+    // load lands, then fall back to the slow poll.
+    let cancelled = false;
+    let attempts = 0;
+    const prime = () => {
+      if (cancelled) return;
+      void (async () => {
+        const result = await fetchSeats({ environmentId, input: { force: false } });
+        if (cancelled) return;
+        if (result._tag === "Success") {
+          setSeats(result.value.seats);
+          return;
+        }
+        if (attempts++ < 20) setTimeout(prime, 3_000);
+      })();
+    };
+    prime();
     const id = setInterval(() => refresh(), 60_000);
-    return () => clearInterval(id);
-  }, [refresh]);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [refresh, fetchSeats, environmentId]);
 
   if (seats === null || seats.length === 0) return null;
 
@@ -312,10 +332,30 @@ export function RouterPoolPanel() {
   );
 
   useEffect(() => {
-    refresh();
+    // Same connecting-window retry as ClaudeSeatsSection: prime quickly
+    // until the first load lands, then poll slowly.
+    let cancelled = false;
+    let attempts = 0;
+    const prime = () => {
+      if (cancelled) return;
+      void (async () => {
+        if (environmentId === null) return;
+        const result = await fetchAccounts({ environmentId, input: { force: false } });
+        if (cancelled) return;
+        if (result._tag === "Success") {
+          setRows(result.value.rows);
+          return;
+        }
+        if (attempts++ < 20) setTimeout(prime, 3_000);
+      })();
+    };
+    prime();
     const id = setInterval(() => refresh(), 60_000);
-    return () => clearInterval(id);
-  }, [refresh]);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [refresh, fetchAccounts, environmentId]);
 
   const live = (rows ?? []).filter((row) => row.enabled).length;
 
