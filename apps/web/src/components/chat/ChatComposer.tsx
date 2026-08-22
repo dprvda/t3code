@@ -64,6 +64,7 @@ import {
   usePromptStashStore,
   type PromptStashEntry,
 } from "../../promptStashStore";
+import { usePrimarySettings } from "../../hooks/useSettings";
 import { ComposerStashBadge } from "./ComposerStashBadge";
 import { ComposerStashMenu } from "./ComposerStashMenu";
 import {
@@ -110,7 +111,7 @@ import {
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
 } from "./composerProviderState";
-import { ContextWindowMeter } from "./ContextWindowMeter";
+import { ContextWindowMeter, RecycleThresholdMeter } from "./ContextWindowMeter";
 import { resolveContextWindowModelDisplayName } from "./ContextWindowMeter.logic";
 import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
 import { basenameOfPath } from "../../pierre-icons";
@@ -442,13 +443,22 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
 }) {
+  const contextRecycle = usePrimarySettings((settings) => settings.contextRecycle);
   return (
     <>
       {props.activeContextWindow ? (
-        <ContextWindowMeter
-          usage={props.activeContextWindow}
-          modelDisplayName={props.activeThreadModelDisplayName}
-        />
+        <>
+          <ContextWindowMeter
+            usage={props.activeContextWindow}
+            modelDisplayName={props.activeThreadModelDisplayName}
+          />
+          {contextRecycle.enabled ? (
+            <RecycleThresholdMeter
+              usage={props.activeContextWindow}
+              thresholdTokens={contextRecycle.thresholdTokens}
+            />
+          ) : null}
+        </>
       ) : null}
       {props.isPreparingWorktree ? (
         <span className="text-secondary-label text-xs">Preparing worktree...</span>

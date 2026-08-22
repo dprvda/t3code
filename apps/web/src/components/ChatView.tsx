@@ -259,6 +259,7 @@ import {
 import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { DocBricksPicker } from "./chat/DocBricksPicker";
+import { ThreadSettleControl } from "./chat/ThreadSettleControl";
 import { ThreadRecycleControl } from "./chat/ThreadRecycleControl";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
@@ -6558,10 +6559,21 @@ function ChatViewContent(props: ChatViewProps) {
                             composerDraftTarget={composerDraftTarget}
                             recycleControl={
                               isServerThread && activeThreadId !== null ? (
-                                <ThreadRecycleControl
-                                  environmentId={environmentId}
-                                  threadId={activeThreadId}
-                                />
+                                <>
+                                  <ThreadSettleControl
+                                    environmentId={environmentId}
+                                    threadId={activeThreadId}
+                                    isSettled={
+                                      activeServerThread !== null &&
+                                      (activeServerThread.settledAt !== null ||
+                                        activeServerThread.settledOverride === "settled")
+                                    }
+                                  />
+                                  <ThreadRecycleControl
+                                    environmentId={environmentId}
+                                    threadId={activeThreadId}
+                                  />
+                                </>
                               ) : null
                             }
                             docBricksPicker={

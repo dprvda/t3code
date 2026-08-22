@@ -1,5 +1,8 @@
 import {
   ArchiveIcon,
+  CircleCheckIcon,
+  RecycleIcon,
+  UndoDotIcon,
   ArrowUpDownIcon,
   ChevronRightIcon,
   CloudIcon,
@@ -389,6 +392,13 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   const openPreview = useAtomCommand(previewEnvironment.open, {
     reportFailure: false,
   });
+  const settleThreadCommand = useAtomCommand(threadEnvironment.settle, "thread settle");
+  const unsettleThreadCommand = useAtomCommand(threadEnvironment.unsettle, "thread unsettle");
+  const requestRecycleCommand = useAtomCommand(
+    threadEnvironment.requestRecycle,
+    "thread recycle request",
+  );
+  const isRowSettled = thread.settledAt !== null || thread.settledOverride === "settled";
   const environment = useEnvironment(thread.environmentId);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const isRemoteThread =
@@ -472,6 +482,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   const clearConfirmingArchive = useCallback(() => {
     setConfirmingArchiveThreadKey((current) => (current === threadKey ? null : current));
   }, [setConfirmingArchiveThreadKey, threadKey]);
+
   const handleMouseLeave = useCallback(() => {
     clearConfirmingArchive();
   }, [clearConfirmingArchive]);
@@ -641,6 +652,70 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     },
     [],
   );
+  // Settle + recycle beside Archive: same actions the grid pane titlebar has.
+  const settleRecycleRowActions = (
+    <>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              data-thread-selection-safe
+              data-testid={`thread-settle-${thread.id}`}
+              aria-label={`${isRowSettled ? "Unsettle" : "Settle"} ${thread.title}`}
+              className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
+              onPointerDown={stopPropagationOnPointerDown}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (isRowSettled) {
+                  void unsettleThreadCommand({
+                    environmentId: thread.environmentId,
+                    input: { threadId: thread.id, reason: "user" },
+                  });
+                } else {
+                  void settleThreadCommand({
+                    environmentId: thread.environmentId,
+                    input: { threadId: thread.id },
+                  });
+                }
+              }}
+            />
+          }
+        >
+          {isRowSettled ? (
+            <UndoDotIcon className="size-3.5" />
+          ) : (
+            <CircleCheckIcon className="size-3.5" />
+          )}
+        </TooltipTrigger>
+        <TooltipPopup side="top">{isRowSettled ? "Unsettle" : "Settle"}</TooltipPopup>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              data-thread-selection-safe
+              data-testid={`thread-recycle-${thread.id}`}
+              aria-label={`Recycle ${thread.title}`}
+              className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
+              onPointerDown={stopPropagationOnPointerDown}
+              onClick={(event) => {
+                event.stopPropagation();
+                void requestRecycleCommand({
+                  environmentId: thread.environmentId,
+                  input: { threadId: thread.id },
+                });
+              }}
+            />
+          }
+        >
+          <RecycleIcon className="size-3.5" />
+        </TooltipTrigger>
+        <TooltipPopup side="top">Recycle session</TooltipPopup>
+      </Tooltip>
+    </>
+  );
   const handleConfirmArchiveClick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
       event.preventDefault();
@@ -806,6 +881,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
             ) : !isThreadRunning ? (
               appSettingsConfirmThreadArchive ? (
                 <div className="pointer-events-none absolute top-1/2 right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                  {settleRecycleRowActions}
                   <button
                     type="button"
                     data-thread-selection-safe
@@ -819,10 +895,11 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                   </button>
                 </div>
               ) : (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <div className="pointer-events-none absolute top-1/2 right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                <div className="pointer-events-none absolute top-1/2 right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                  {settleRecycleRowActions}
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
                         <button
                           type="button"
                           data-thread-selection-safe
@@ -831,14 +908,14 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                           className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
                           onPointerDown={stopPropagationOnPointerDown}
                           onClick={handleArchiveImmediateClick}
-                        >
-                          <ArchiveIcon className="size-3.5" />
-                        </button>
-                      </div>
-                    }
-                  />
-                  <TooltipPopup side="top">Archive</TooltipPopup>
-                </Tooltip>
+                        />
+                      }
+                    >
+                      <ArchiveIcon className="size-3.5" />
+                    </TooltipTrigger>
+                    <TooltipPopup side="top">Archive</TooltipPopup>
+                  </Tooltip>
+                </div>
               )
             ) : null}
             <span className={threadMetaClassName}>

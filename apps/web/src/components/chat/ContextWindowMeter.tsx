@@ -136,3 +136,113 @@ export function ContextWindowMeter(props: {
     </Popover>
   );
 }
+
+/**
+ * Second ring beside the context-window meter: the same used-token count
+ * measured against the AUTO-RECYCLE threshold from Settings, so the owner
+ * sees how close the session is to the handoff-and-restart trigger.
+ */
+export function RecycleThresholdMeter(props: {
+  usage: ContextWindowSnapshot;
+  thresholdTokens: number;
+}) {
+  const { usage, thresholdTokens } = props;
+  const usedTokens = usage.usedTokens ?? 0;
+  const percentage = thresholdTokens > 0 ? (usedTokens / thresholdTokens) * 100 : 0;
+  const normalizedPercentage = Math.max(0, Math.min(100, percentage));
+  const usedPercentage = formatPercentage(percentage);
+  const radius = 9.75;
+  const circumference = 2 * Math.PI * radius;
+  const dashOffset = circumference * (1 - normalizedPercentage / 100);
+  const isNearRecycle = normalizedPercentage > 90;
+  const usageColor = isNearRecycle
+    ? "var(--color-error)"
+    : normalizedPercentage > 70
+      ? "var(--color-warning, oklch(0.75 0.15 85))"
+      : "color-mix(in oklab, var(--color-muted-foreground) 72%, transparent)";
+
+  return (
+    <Popover>
+      <PopoverTrigger
+        openOnHover
+        delay={150}
+        closeDelay={0}
+        render={
+          <Button
+            size="icon-sm"
+            variant="ghost-muted"
+            className="size-7 rounded-full hover:text-muted-foreground data-pressed:text-muted-foreground"
+            aria-label={`Auto-recycle ${usedPercentage ?? "0%"} of threshold used`}
+          >
+            <span className="relative flex size-5 items-center justify-center">
+              <svg
+                viewBox="0 0 24 24"
+                className="-rotate-90 absolute inset-0 size-full transform-gpu mx-0!"
+                aria-hidden="true"
+              >
+                <circle
+                  cx="12"
+                  cy="12"
+                  r={radius}
+                  fill="none"
+                  stroke="color-mix(in oklab, var(--color-muted-foreground) 24%, transparent)"
+                  strokeWidth="3"
+                  strokeDasharray="2 3"
+                />
+                <circle
+                  cx="12"
+                  cy="12"
+                  r={radius}
+                  fill="none"
+                  stroke={usageColor}
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeDasharray={circumference}
+                  strokeDashoffset={dashOffset}
+                  className="transition-[stroke-dashoffset,stroke] duration-500 ease-out motion-reduce:transition-none"
+                />
+              </svg>
+            </span>
+          </Button>
+        }
+      />
+      <PopoverPopup
+        tooltipStyle
+        side="top"
+        align="end"
+        viewportClassName="p-0"
+        className="w-64 max-w-none text-left whitespace-normal"
+      >
+        <div className="flex flex-col gap-2 p-[var(--floating-content-inset)]">
+          <div className="flex items-center justify-between gap-3">
+            <div className="font-medium text-muted-foreground text-xs">Auto-recycle</div>
+            <div className="text-secondary-label text-[11px] tabular-nums">
+              <span>{usedPercentage ?? "0%"}</span>
+              <span className="mx-1">·</span>
+              <span>
+                {formatContextWindowTokens(usedTokens)}/{formatContextWindowTokens(thresholdTokens)}
+              </span>
+            </div>
+          </div>
+          <div
+            className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(normalizedPercentage)}
+            aria-label="Auto-recycle threshold usage"
+          >
+            <div
+              className="h-full rounded-full transition-[width,background-color] duration-500 ease-out motion-reduce:transition-none"
+              style={{ width: `${normalizedPercentage}%`, backgroundColor: usageColor }}
+            />
+          </div>
+          <div className="mt-1 text-pretty text-secondary-label text-[11px] font-medium">
+            The session writes a handoff and restarts fresh at{" "}
+            {formatContextWindowTokens(thresholdTokens)} tokens (Settings → General).
+          </div>
+        </div>
+      </PopoverPopup>
+    </Popover>
+  );
+}
