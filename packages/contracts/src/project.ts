@@ -122,14 +122,18 @@ export type ProjectLaunchDocsGetInput = typeof ProjectLaunchDocsGetInput.Type;
 export const ProjectLaunchDocsSetInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   include: Schema.Array(Schema.String),
+  // Additive: named doc packs referenced from include as "pack:<name>".
+  // Omitted (older clients) = keep the stored packs untouched.
+  packs: Schema.optional(Schema.Record(Schema.String, Schema.Array(Schema.String))),
 });
 export type ProjectLaunchDocsSetInput = typeof ProjectLaunchDocsSetInput.Type;
 
-// include = the stored selection (folder entries end in "/");
-// resolved = its expansion into concrete docs at read time.
+// include = the stored selection (folder entries end in "/", pack entries
+// are "pack:<name>"); resolved = its expansion into concrete docs at read time.
 export const ProjectLaunchDocsResult = Schema.Struct({
   include: Schema.Array(Schema.String),
   resolved: Schema.Array(ProjectDocBrick),
+  packs: Schema.optional(Schema.Record(Schema.String, Schema.Array(Schema.String))),
 });
 export type ProjectLaunchDocsResult = typeof ProjectLaunchDocsResult.Type;
 

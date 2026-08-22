@@ -77,36 +77,82 @@ function markdownUnder(workspaceRoot: string, startRel: string, cap: number): st
   return out;
 }
 
-/** The stored selection, `[]` on a missing or invalid file. Rels are normalized to `/`. */
-export function readLaunchDocsInclude(workspaceRoot: string): string[] {
+export type LaunchDocsConfig = {
+  readonly include: string[];
+  /** Named doc packs: reusable bundles the include list references as `pack:<name>`. */
+  readonly packs: Record<string, string[]>;
+};
+
+/** A `pack:<name>` include entry's pack name, or null for a plain path entry. */
+export function packNameOf(entry: string): string | null {
+  return entry.startsWith("pack:") && entry.length > 5 ? entry.slice(5) : null;
+}
+
+function normalizeRels(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim().replace(/\\/g, "/"))
+    .filter((entry) => entry !== "");
+}
+
+/** The stored config, empty on a missing or invalid file. Rels are normalized to `/`. */
+export function readLaunchDocsConfig(workspaceRoot: string): LaunchDocsConfig {
   try {
     const raw = NodeFS.readFileSync(NodePath.join(workspaceRoot, LAUNCH_DOCS_FILE), "utf8");
     const parsed: unknown = JSON.parse(raw);
-    const include = (parsed as { include?: unknown }).include;
-    if (!Array.isArray(include)) return [];
-    return include
-      .filter((entry): entry is string => typeof entry === "string")
-      .map((entry) => entry.trim().replace(/\\/g, "/"))
-      .filter((entry) => entry !== "");
+    const record = parsed as { include?: unknown; packs?: unknown };
+    const packs: Record<string, string[]> = {};
+    if (record.packs && typeof record.packs === "object" && !Array.isArray(record.packs)) {
+      for (const [name, members] of Object.entries(record.packs as Record<string, unknown>)) {
+        const trimmed = name.trim();
+        if (trimmed === "") continue;
+        packs[trimmed] = normalizeRels(members);
+      }
+    }
+    return { include: normalizeRels(record.include), packs };
   } catch {
-    return [];
+    return { include: [], packs: {} };
   }
 }
 
-/** Persist the selection (creates `.t3/`). Throws on filesystem failure. */
-export function writeLaunchDocsInclude(workspaceRoot: string, include: readonly string[]): void {
+/** The stored selection, `[]` on a missing or invalid file. Rels are normalized to `/`. */
+export function readLaunchDocsInclude(workspaceRoot: string): string[] {
+  return readLaunchDocsConfig(workspaceRoot).include;
+}
+
+/** Persist the config (creates `.t3/`). Throws on filesystem failure. */
+export function writeLaunchDocsConfig(
+  workspaceRoot: string,
+  include: readonly string[],
+  packs: Readonly<Record<string, readonly string[]>>,
+): void {
   const file = NodePath.join(workspaceRoot, LAUNCH_DOCS_FILE);
   NodeFS.mkdirSync(NodePath.dirname(file), { recursive: true });
-  const body = JSON.stringify({ version: 1, include }, null, 2);
+  const body = JSON.stringify(
+    { version: 1, include, ...(Object.keys(packs).length > 0 ? { packs } : {}) },
+    null,
+    2,
+  );
   NodeFS.writeFileSync(file, `${body}\n`);
 }
 
+/** Persist just the selection, preserving any stored packs. */
+export function writeLaunchDocsInclude(workspaceRoot: string, include: readonly string[]): void {
+  writeLaunchDocsConfig(workspaceRoot, include, readLaunchDocsConfig(workspaceRoot).packs);
+}
+
 /**
- * Expand the selection into concrete docs: folder entries become their
+ * Expand the selection into concrete docs: pack entries become their
+ * members (one level — packs hold plain paths), folder entries become their
  * markdown contents (recursive, sorted), file entries are stat'd as-is so
  * missing ones surface with `exists: false`. Deduped by rel, first wins.
  */
-export function resolveLaunchDocs(workspaceRoot: string, include: readonly string[]): DocBrick[] {
+export function resolveLaunchDocs(
+  workspaceRoot: string,
+  include: readonly string[],
+  packs: Readonly<Record<string, readonly string[]>> = {},
+): DocBrick[] {
   const rels: string[] = [];
   const seen = new Set<string>();
   const add = (rel: string): void => {
@@ -114,7 +160,12 @@ export function resolveLaunchDocs(workspaceRoot: string, include: readonly strin
     seen.add(rel);
     rels.push(rel);
   };
-  for (const entry of include) {
+  const flattened = include.flatMap((entry) => {
+    const packName = packNameOf(entry);
+    // unknown pack name → nothing to inject; the dialog shows packs by name
+    return packName !== null ? (packs[packName] ?? []) : [entry];
+  });
+  for (const entry of flattened) {
     const isFolder =
       entry.endsWith("/") ||
       (() => {
@@ -141,9 +192,11 @@ export function resolveLaunchDocs(workspaceRoot: string, include: readonly strin
  */
 export function launchDocsPrefix(workspaceRoot: string): string | null {
   try {
-    const include = readLaunchDocsInclude(workspaceRoot);
+    const { include, packs } = readLaunchDocsConfig(workspaceRoot);
     if (include.length === 0) return null;
-    const existing = resolveLaunchDocs(workspaceRoot, include).filter((brick) => brick.exists);
+    const existing = resolveLaunchDocs(workspaceRoot, include, packs).filter(
+      (brick) => brick.exists,
+    );
     if (existing.length === 0) return null;
     return `read these repo docs first, in order, before any other work:\n${existing
       .map((brick) => `- ${brick.rel}`)

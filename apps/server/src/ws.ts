@@ -97,9 +97,9 @@ import { docBricks } from "./workspace/docBricks.ts";
 import {
   docMap,
   launchDocsPrefix,
-  readLaunchDocsInclude,
+  readLaunchDocsConfig,
   resolveLaunchDocs,
-  writeLaunchDocsInclude,
+  writeLaunchDocsConfig,
 } from "./workspace/launchDocs.ts";
 import { makeRouterAccounts, makeRouterLoginRunner } from "./provider/routerAccounts.ts";
 import { claudeSeatConfigDir } from "./orchestration/Layers/ClaudeSeatRotationReactor.ts";
@@ -2014,8 +2014,8 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             WS_METHODS.projectsLaunchDocsGet,
             Effect.sync(() => {
-              const include = readLaunchDocsInclude(input.cwd);
-              return { include, resolved: resolveLaunchDocs(input.cwd, include) };
+              const { include, packs } = readLaunchDocsConfig(input.cwd);
+              return { include, packs, resolved: resolveLaunchDocs(input.cwd, include, packs) };
             }),
             { "rpc.aggregate": "workspace" },
           ),
@@ -2024,9 +2024,14 @@ const makeWsRpcLayer = (
             WS_METHODS.projectsLaunchDocsSet,
             Effect.try({
               try: () => {
-                writeLaunchDocsInclude(input.cwd, input.include);
-                const include = readLaunchDocsInclude(input.cwd);
-                return { include, resolved: resolveLaunchDocs(input.cwd, include) };
+                writeLaunchDocsConfig(
+                  input.cwd,
+                  input.include,
+                  // Omitted packs (older client) keep the stored ones.
+                  input.packs ?? readLaunchDocsConfig(input.cwd).packs,
+                );
+                const { include, packs } = readLaunchDocsConfig(input.cwd);
+                return { include, packs, resolved: resolveLaunchDocs(input.cwd, include, packs) };
               },
               catch: (cause) =>
                 new ProjectLaunchDocsError({

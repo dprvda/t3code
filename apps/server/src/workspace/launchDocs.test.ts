@@ -9,8 +9,10 @@ import {
   LAUNCH_DOCS_FILE,
   docMap,
   launchDocsPrefix,
+  readLaunchDocsConfig,
   readLaunchDocsInclude,
   resolveLaunchDocs,
+  writeLaunchDocsConfig,
   writeLaunchDocsInclude,
 } from "./launchDocs.ts";
 
@@ -46,6 +48,31 @@ describe("launch docs config", () => {
     seed(LAUNCH_DOCS_FILE, JSON.stringify({ include: ["a.md", 7, "  "] }));
     expect(readLaunchDocsInclude(root)).toEqual(["a.md"]);
   });
+
+  it("packs roundtrip; writeLaunchDocsInclude preserves stored packs", () => {
+    writeLaunchDocsConfig(root, ["pack:core"], { core: ["README.md", "docs/"] });
+    expect(readLaunchDocsConfig(root)).toEqual({
+      include: ["pack:core"],
+      packs: { core: ["README.md", "docs/"] },
+    });
+    writeLaunchDocsInclude(root, ["pack:core", "extra.md"]);
+    expect(readLaunchDocsConfig(root)).toEqual({
+      include: ["pack:core", "extra.md"],
+      packs: { core: ["README.md", "docs/"] },
+    });
+    // empty packs are omitted from the stored file
+    writeLaunchDocsConfig(root, ["a.md"], {});
+    const raw = JSON.parse(NodeFS.readFileSync(NodePath.join(root, LAUNCH_DOCS_FILE), "utf8"));
+    expect("packs" in raw).toBe(false);
+  });
+
+  it("malformed packs read as empty; blank names and members are dropped", () => {
+    seed(
+      LAUNCH_DOCS_FILE,
+      JSON.stringify({ include: [], packs: { " ": ["a.md"], ok: ["b.md", 7, " "], bad: "x" } }),
+    );
+    expect(readLaunchDocsConfig(root).packs).toEqual({ ok: ["b.md"], bad: [] });
+  });
 });
 
 describe("resolveLaunchDocs", () => {
@@ -73,6 +100,28 @@ describe("resolveLaunchDocs", () => {
       "docs/a.md",
       ".claude/handoffs/h.md",
     ]);
+  });
+});
+
+describe("resolveLaunchDocs packs", () => {
+  it("pack entries expand to their members (files and folders), deduped; unknown packs vanish", () => {
+    seed("README.md", "readme\n");
+    seed("docs/a.md", "a\n");
+    seed("docs/b.md", "b\n");
+    const bricks = resolveLaunchDocs(root, ["pack:core", "docs/a.md", "pack:ghost"], {
+      core: ["README.md", "docs/"],
+    });
+    expect(bricks.map((brick) => [brick.rel, brick.exists])).toEqual([
+      ["README.md", true],
+      ["docs/a.md", true],
+      ["docs/b.md", true],
+    ]);
+  });
+
+  it("launchDocsPrefix injects pack docs", () => {
+    seed("README.md", "readme\n");
+    writeLaunchDocsConfig(root, ["pack:core"], { core: ["README.md"] });
+    expect(launchDocsPrefix(root)).toContain("- README.md");
   });
 });
 

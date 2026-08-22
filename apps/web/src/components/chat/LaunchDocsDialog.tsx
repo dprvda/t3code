@@ -1,5 +1,12 @@
 import type { EnvironmentId, ProjectDocMapEntry } from "@t3tools/contracts";
-import { ChevronDownIcon, ChevronRightIcon, FileTextIcon, FolderIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  FileTextIcon,
+  FolderIcon,
+  PackageIcon,
+  XIcon,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { projectEnvironment } from "~/state/projects";
@@ -71,6 +78,8 @@ export interface LaunchDocsDialogProps {
 export function LaunchDocsDialog(props: LaunchDocsDialogProps) {
   const [entries, setEntries] = useState<readonly ProjectDocMapEntry[] | null>(null);
   const [include, setInclude] = useState<readonly string[]>([]);
+  const [packs, setPacks] = useState<Readonly<Record<string, readonly string[]>>>({});
+  const [packName, setPackName] = useState("");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [isSaving, setIsSaving] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -95,6 +104,8 @@ export function LaunchDocsDialog(props: LaunchDocsDialogProps) {
       }
       setEntries(mapResult.value.entries);
       setInclude(configResult.value.include);
+      setPacks(configResult.value.packs ?? {});
+      setPackName("");
       // Deep repos start with only the top level open; shallow ones fully open.
       const dirs = mapResult.value.entries.filter((entry) => entry.kind === "dir");
       setCollapsed(
@@ -108,7 +119,17 @@ export function LaunchDocsDialog(props: LaunchDocsDialogProps) {
   }, [props.open, props.environmentId, props.cwd, fetchDocMap, fetchLaunchDocs]);
 
   const tree = useMemo(() => (entries === null ? [] : buildTree(entries)), [entries]);
-  const includeSet = useMemo(() => new Set(include), [include]);
+  // Pack entries expand into their members for coverage/estimate purposes;
+  // the raw include keeps the "pack:<name>" entries the server stores.
+  const includeSet = useMemo(
+    () =>
+      new Set(
+        include.flatMap((entry) =>
+          entry.startsWith("pack:") ? (packs[entry.slice(5)] ?? []) : [entry],
+        ),
+      ),
+    [include, packs],
+  );
   const coveredByAncestor = useCallback(
     (rel: string) => ancestorDirs(rel).some((dir) => includeSet.has(`${dir}/`)),
     [includeSet],
@@ -141,16 +162,39 @@ export function LaunchDocsDialog(props: LaunchDocsDialogProps) {
     void (async () => {
       const result = await saveLaunchDocs({
         environmentId: props.environmentId,
-        input: { cwd: props.cwd, include },
+        input: { cwd: props.cwd, include, packs },
       });
       setIsSaving(false);
       if (result._tag === "Success") props.onOpenChange(false);
     })();
-  }, [saveLaunchDocs, props, include]);
+  }, [saveLaunchDocs, props, include, packs]);
+
+  // Bundle the current plain selection under a name; the include list then
+  // carries the single "pack:<name>" reference instead.
+  const saveSelectionAsPack = useCallback(() => {
+    const name = packName.trim();
+    const members = include.filter((entry) => !entry.startsWith("pack:"));
+    if (name === "" || members.length === 0) return;
+    setPacks((previous) => ({ ...previous, [name]: members }));
+    setInclude((previous) => [
+      ...previous.filter((entry) => entry.startsWith("pack:") && entry !== `pack:${name}`),
+      `pack:${name}`,
+    ]);
+    setPackName("");
+  }, [packName, include]);
+
+  const deletePack = useCallback((name: string) => {
+    setPacks((previous) =>
+      Object.fromEntries(Object.entries(previous).filter(([n]) => n !== name)),
+    );
+    setInclude((previous) => previous.filter((entry) => entry !== `pack:${name}`));
+  }, []);
 
   const renderNode = (node: TreeNode): React.ReactNode => {
-    const covered = coveredByAncestor(node.rel);
-    const checked = covered || includeSet.has(node.kind === "dir" ? `${node.rel}/` : node.rel);
+    const key = node.kind === "dir" ? `${node.rel}/` : node.rel;
+    const coveredByPack = includeSet.has(key) && !include.includes(key);
+    const covered = coveredByAncestor(node.rel) || coveredByPack;
+    const checked = covered || includeSet.has(key);
     const isCollapsed = collapsed.has(node.rel);
     return (
       <div key={node.rel}>
@@ -230,6 +274,68 @@ export function LaunchDocsDialog(props: LaunchDocsDialogProps) {
           ) : (
             tree.map(renderNode)
           )}
+        </div>
+        {/* Doc packs: named bundles the include list references as pack:<name>. */}
+        <div className="flex flex-col gap-1">
+          {Object.entries(packs).map(([name, members]) => {
+            const reference = `pack:${name}`;
+            const injected = include.includes(reference);
+            return (
+              <div
+                key={name}
+                className="flex items-center gap-2 rounded-md border border-border px-2 py-1"
+              >
+                <Checkbox
+                  checked={injected}
+                  aria-label={`Inject pack ${name}`}
+                  onCheckedChange={() =>
+                    setInclude((previous) =>
+                      injected
+                        ? previous.filter((entry) => entry !== reference)
+                        : [...previous, reference],
+                    )
+                  }
+                />
+                <PackageIcon className="size-3.5 shrink-0 text-secondary-label" />
+                <span className="min-w-0 flex-1 truncate font-medium text-xs">{name}</span>
+                <span className="shrink-0 text-[10px] text-secondary-label tabular-nums">
+                  {members.length} entries
+                </span>
+                <button
+                  type="button"
+                  aria-label={`Delete pack ${name}`}
+                  className="shrink-0 rounded p-0.5 text-secondary-label hover:bg-accent hover:text-foreground"
+                  onClick={() => deletePack(name)}
+                >
+                  <XIcon className="size-3" />
+                </button>
+              </div>
+            );
+          })}
+          <div className="flex items-center gap-2">
+            <input
+              value={packName}
+              onChange={(changeEvent) => setPackName(changeEvent.target.value)}
+              onKeyDown={(keyEvent) => {
+                if (keyEvent.key === "Enter") {
+                  keyEvent.preventDefault();
+                  saveSelectionAsPack();
+                }
+              }}
+              placeholder="pack name…"
+              className="h-7 min-w-0 flex-1 rounded-md border border-border bg-transparent px-2 text-xs outline-none placeholder:text-secondary-label/60 focus:border-ring"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={
+                packName.trim() === "" || !include.some((entry) => !entry.startsWith("pack:"))
+              }
+              onClick={saveSelectionAsPack}
+            >
+              Save selection as pack
+            </Button>
+          </div>
         </div>
         <div className="flex items-center justify-between gap-2">
           <span className="text-secondary-label text-xs">
