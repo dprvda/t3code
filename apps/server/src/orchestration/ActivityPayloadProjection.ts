@@ -53,6 +53,8 @@ function collectChangedFiles(
 
   pushChangedFile(target, seen, record.path);
   pushChangedFile(target, seen, record.filePath);
+  pushChangedFile(target, seen, record.file_path);
+  pushChangedFile(target, seen, record.notebook_path);
   pushChangedFile(target, seen, record.relativePath);
   pushChangedFile(target, seen, record.filename);
   pushChangedFile(target, seen, record.newPath);
@@ -270,6 +272,52 @@ function projectMcpToolCallData(data: Record<string, unknown>): Record<string, u
   return projectedData;
 }
 
+/**
+ * Cap for preserved file-edit strings: enough for the inline diff clients
+ * render, without letting a whole-file Write dominate wire size.
+ */
+const FILE_EDIT_STRING_CAP = 20_000;
+
+function capString(value: unknown): string | undefined {
+  return typeof value === "string" ? value.slice(0, FILE_EDIT_STRING_CAP) : undefined;
+}
+
+/**
+ * The structured before/after of a Claude file-mutation tool (Edit's
+ * old_string/new_string, Write's content). Clients render it as the inline
+ * diff under the tool row, so it must survive wire slimming — capped, and
+ * only for inputs that actually look like a file edit.
+ */
+function projectFileEditInput(data: Record<string, unknown>): Record<string, unknown> | undefined {
+  const input = asRecord(data.input);
+  if (!input) {
+    return undefined;
+  }
+  const path =
+    asTrimmedString(input.file_path) ??
+    asTrimmedString(input.notebook_path) ??
+    asTrimmedString(input.path);
+  if (!path) {
+    return undefined;
+  }
+  const projected: Record<string, unknown> = { file_path: path };
+  const oldString = capString(input.old_string);
+  const newString = capString(input.new_string);
+  const content = capString(input.content);
+  if (oldString !== undefined && newString !== undefined) {
+    projected.old_string = oldString;
+    projected.new_string = newString;
+  } else if (content !== undefined) {
+    projected.content = content;
+  } else {
+    return undefined;
+  }
+  if (input.replace_all !== undefined) {
+    projected.replace_all = input.replace_all;
+  }
+  return projected;
+}
+
 function projectRawOutput(value: unknown): Record<string, unknown> | undefined {
   const direct = asTrimmedString(value);
   if (direct) {
@@ -367,6 +415,13 @@ export function projectActivityPayload(
   if (changedFiles.length > 0) {
     // Both clients discover file names by walking objects with path-like keys.
     projectedData.files = changedFiles.map((path) => ({ path }));
+  }
+
+  if (payload.itemType === "file_change") {
+    const fileEditInput = projectFileEditInput(data);
+    if (fileEditInput) {
+      projectedData.input = fileEditInput;
+    }
   }
 
   if ("toolCallId" in data) {

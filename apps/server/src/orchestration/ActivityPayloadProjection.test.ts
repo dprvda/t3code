@@ -207,3 +207,70 @@ describe("projectActivityPayload", () => {
     expect(projected.payload).toEqual(source.payload);
   });
 });
+
+describe("file-change input projection", () => {
+  const baseActivity = {
+    id: "act-1",
+    tone: "tool",
+    kind: "tool.completed",
+    summary: "File change",
+    turnId: null,
+    createdAt: "2026-08-22T12:00:00.000Z",
+  } as const;
+
+  it("preserves capped old/new strings for Edit and collects snake_case paths", () => {
+    const projected = projectActivityPayload({
+      ...baseActivity,
+      payload: {
+        itemType: "file_change",
+        toolCallId: "toolu_1",
+        detail: "Edit: /repo/a.md",
+        data: {
+          toolName: "Edit",
+          input: {
+            file_path: "/repo/a.md",
+            old_string: "before",
+            new_string: "after",
+            replace_all: false,
+          },
+        },
+      },
+    } as never);
+    const payload = projected.payload as Record<string, unknown>;
+    const data = payload.data as Record<string, unknown>;
+    expect(data.input).toEqual({
+      file_path: "/repo/a.md",
+      old_string: "before",
+      new_string: "after",
+      replace_all: false,
+    });
+    expect(data.files).toEqual([{ path: "/repo/a.md" }]);
+  });
+
+  it("preserves Write content and caps oversized strings", () => {
+    const big = "x".repeat(30_000);
+    const projected = projectActivityPayload({
+      ...baseActivity,
+      payload: {
+        itemType: "file_change",
+        data: { toolName: "Write", input: { file_path: "/repo/new.md", content: big } },
+      },
+    } as never);
+    const data = (projected.payload as Record<string, unknown>).data as Record<string, unknown>;
+    const input = data.input as Record<string, unknown>;
+    expect(input.file_path).toBe("/repo/new.md");
+    expect((input.content as string).length).toBe(20_000);
+  });
+
+  it("drops non-edit file_change inputs entirely", () => {
+    const projected = projectActivityPayload({
+      ...baseActivity,
+      payload: {
+        itemType: "file_change",
+        data: { toolName: "Glob", input: { pattern: "**/*.md" } },
+      },
+    } as never);
+    const data = (projected.payload as Record<string, unknown>).data as Record<string, unknown>;
+    expect(data.input).toBeUndefined();
+  });
+});

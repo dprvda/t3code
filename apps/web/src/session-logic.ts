@@ -75,6 +75,15 @@ export interface WorkLogEntry {
   tone: "thinking" | "tool" | "info" | "error";
   toolTitle?: string;
   toolData?: unknown;
+  /**
+   * Present on Claude file-mutation tools (Edit/Write): the structured
+   * before/after payload the timeline renders as an inline diff.
+   */
+  fileEdit?: {
+    readonly path: string;
+    readonly oldText: string;
+    readonly newText: string;
+  };
   itemType?: ToolLifecycleItemType;
   requestKind?: PendingApproval["requestKind"];
   /** From runtime item / task payload `status` when present (e.g. tool.updated). */
@@ -960,6 +969,12 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       entry.toolData = data.item;
     }
   }
+  if (itemType === "file_change") {
+    const fileEdit = extractFileEditFromToolData(asRecord(payload?.data));
+    if (fileEdit) {
+      entry.fileEdit = fileEdit;
+    }
+  }
   if (itemType) {
     entry.itemType = itemType;
   }
@@ -1170,6 +1185,7 @@ function mergeDerivedWorkLogEntries(
   const toolCallId = next.toolCallId ?? previous.toolCallId;
   const toolLifecycleStatus = next.toolLifecycleStatus ?? previous.toolLifecycleStatus;
   const toolData = next.toolData ?? previous.toolData;
+  const fileEdit = next.fileEdit ?? previous.fileEdit;
   return {
     ...previous,
     ...next,
@@ -1184,6 +1200,7 @@ function mergeDerivedWorkLogEntries(
     ...(toolCallId ? { toolCallId } : {}),
     ...(toolLifecycleStatus !== undefined ? { toolLifecycleStatus } : {}),
     ...(toolData !== undefined ? { toolData } : {}),
+    ...(fileEdit !== undefined ? { fileEdit } : {}),
   };
 }
 
@@ -1570,6 +1587,33 @@ function extractToolOutput(payload: Record<string, unknown> | null): string | nu
     }
   }
 
+  return null;
+}
+
+/**
+ * Structured before/after from a Claude file-mutation tool call
+ * (`data.input` of tool.started/completed activities). Write reads as a
+ * whole-file addition; Edit as old_string -> new_string.
+ */
+function extractFileEditFromToolData(
+  data: Record<string, unknown> | null,
+): WorkLogEntry["fileEdit"] | null {
+  const input = asRecord(data?.input);
+  if (!input) return null;
+  const path =
+    asTrimmedString(input.file_path) ??
+    asTrimmedString(input.notebook_path) ??
+    asTrimmedString(input.path);
+  if (!path) return null;
+  const oldString = typeof input.old_string === "string" ? input.old_string : null;
+  const newString = typeof input.new_string === "string" ? input.new_string : null;
+  if (oldString !== null && newString !== null && (oldString !== "" || newString !== "")) {
+    return { path, oldText: oldString, newText: newString };
+  }
+  const content = typeof input.content === "string" ? input.content : null;
+  if (content !== null && content !== "") {
+    return { path, oldText: "", newText: content };
+  }
   return null;
 }
 

@@ -2601,6 +2601,55 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   );
 });
 
+/**
+ * Unified patch text for a structured Edit/Write tool payload. Line numbers
+ * are unknown for mid-file edits, so hunks anchor at 1 — the renderer only
+ * needs the red/green shape, like Claude Code's own transcript.
+ */
+function buildFileEditPatch(fileEdit: NonNullable<TimelineWorkEntry["fileEdit"]>): string {
+  const oldLines = fileEdit.oldText === "" ? [] : fileEdit.oldText.split("\n");
+  const newLines = fileEdit.newText === "" ? [] : fileEdit.newText.split("\n");
+  const header =
+    fileEdit.oldText === ""
+      ? `--- /dev/null\n+++ b/${fileEdit.path}\n`
+      : `--- a/${fileEdit.path}\n+++ b/${fileEdit.path}\n`;
+  const hunk = `@@ -1,${oldLines.length} +1,${newLines.length} @@\n`;
+  const body = [...oldLines.map((line) => `-${line}`), ...newLines.map((line) => `+${line}`)].join(
+    "\n",
+  );
+  return `${header}${hunk}${body}\n`;
+}
+
+const InlineFileEditDiff = memo(function InlineFileEditDiff(props: {
+  fileEdit: NonNullable<TimelineWorkEntry["fileEdit"]>;
+}) {
+  const ctx = use(TimelineRowCtx);
+  const renderablePatch = useMemo(
+    () => getRenderablePatch(buildFileEditPatch(props.fileEdit), "inline-file-edit"),
+    [props.fileEdit],
+  );
+  if (renderablePatch === null) return null;
+  return (
+    <div className="mt-1 ms-7 max-h-72 cursor-default overflow-auto rounded-md border border-border/45">
+      {renderablePatch.kind === "files" ? (
+        renderablePatch.files.map((fileDiff) => (
+          <FileDiff
+            key={resolveFileDiffPath(fileDiff)}
+            fileDiff={fileDiff}
+            options={{
+              collapsed: false,
+              diffStyle: "unified",
+              theme: resolveDiffThemeName(ctx.resolvedTheme),
+            }}
+          />
+        ))
+      ) : (
+        <pre className="overflow-x-auto p-2 text-xs">{renderablePatch.text}</pre>
+      )}
+    </div>
+  );
+});
+
 const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;
   workspaceRoot: string | undefined;
@@ -2700,6 +2749,11 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
           </span>
         </div>
       </div>
+      {workEntry.fileEdit ? (
+        <div onClick={stopRowToggle} onPointerDown={stopRowToggle}>
+          <InlineFileEditDiff fileEdit={workEntry.fileEdit} />
+        </div>
+      ) : null}
       {expanded && canExpand && expandedBody ? (
         <div
           className="mt-1 ms-7 cursor-default border-s border-border/45 ps-3 pt-0.5"

@@ -1167,6 +1167,22 @@ function summarizeToolRequest(toolName: string, input: Record<string, unknown>):
     }
   }
 
+  // Claude Code's own tools carry an obvious subject — show it instead of
+  // raw JSON (Edit: path, Read: path, Grep: pattern, WebFetch: url, ...).
+  const subjectValue =
+    input.file_path ??
+    input.notebook_path ??
+    input.path ??
+    input.pattern ??
+    input.query ??
+    input.url;
+  if (typeof subjectValue === "string" && subjectValue.trim().length > 0) {
+    return `${toolName}: ${subjectValue.trim().slice(0, 400)}`;
+  }
+  if (toolName === "TodoWrite" && Array.isArray(input.todos)) {
+    return `${toolName}: ${input.todos.length} todos`;
+  }
+
   const serialized = encodeJsonStringForDiagnostics(input) ?? "[unserializable input]";
   if (serialized.length <= 400) {
     return `${toolName}: ${serialized}`;
