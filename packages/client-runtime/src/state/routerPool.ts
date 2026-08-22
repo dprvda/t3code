@@ -20,6 +20,11 @@ export function createRouterPoolAtoms<R, E>(
       tag: WS_METHODS.routerAccounts,
       staleTimeMs: 30_000,
     }),
+    claudeSeats: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:router:claude-seats",
+      tag: WS_METHODS.claudeSeats,
+      staleTimeMs: 30_000,
+    }),
     toggleAccount: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:router:account-toggle",
       tag: WS_METHODS.routerAccountToggle,

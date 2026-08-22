@@ -80,6 +80,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.projectsDocMap]: AuthOrchestrationReadScope,
   [WS_METHODS.projectsLaunchDocsGet]: AuthOrchestrationReadScope,
   [WS_METHODS.projectsLaunchDocsSet]: AuthOrchestrationOperateScope,
+  [WS_METHODS.claudeSeats]: AuthOrchestrationReadScope,
   [WS_METHODS.routerAccounts]: AuthOrchestrationReadScope,
   [WS_METHODS.routerAccountToggle]: AuthOrchestrationOperateScope,
   [WS_METHODS.routerLoginStart]: AuthOrchestrationOperateScope,

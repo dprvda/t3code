@@ -23,6 +23,7 @@ export * from "./orchestration.ts";
 export * from "./t3ProjectFile.ts";
 export * from "./editor.ts";
 export * from "./project.ts";
+export * from "./claudeSeats.ts";
 export * from "./routerPool.ts";
 export * from "./subagents.ts";
 export * from "./filesystem.ts";

@@ -38,6 +38,7 @@ import {
   ProjectListEntriesError,
   ProjectLaunchDocsError,
   RouterPoolError,
+  ClaudeSeatsError,
   SubagentViewError,
   ProjectReadFileError,
   ProjectSearchContentsError,
@@ -101,6 +102,8 @@ import {
   resolveLaunchDocs,
   writeLaunchDocsConfig,
 } from "./workspace/launchDocs.ts";
+import { listClaudeSeats } from "./provider/claudeSeats.ts";
+import { makeSeatLimitsFetcher } from "./provider/claudeSeatLimits.ts";
 import { makeRouterAccounts, makeRouterLoginRunner } from "./provider/routerAccounts.ts";
 import { claudeSeatConfigDir } from "./orchestration/Layers/ClaudeSeatRotationReactor.ts";
 import { listSubagentRuns, readSubagentTranscript } from "./provider/subagentTranscripts.ts";
@@ -108,6 +111,7 @@ import * as ProviderSessionDirectory from "./provider/Services/ProviderSessionDi
 
 const routerAccountsService = makeRouterAccounts();
 const routerLoginRunner = makeRouterLoginRunner();
+const claudeSeatLimitsService = makeSeatLimitsFetcher();
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import { readWorkflowScript } from "./orchestration/workflowScriptQuery.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
@@ -1927,6 +1931,22 @@ const makeWsRpcLayer = (
               return { blocks };
             }),
             { "rpc.aggregate": "subagents" },
+          ),
+        [WS_METHODS.claudeSeats]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.claudeSeats,
+            Effect.gen(function* () {
+              const settings = yield* serverSettings.getSettings.pipe(
+                Effect.mapError((cause) => new ClaudeSeatsError({ message: String(cause) })),
+              );
+              const seats = yield* Effect.tryPromise({
+                try: () => listClaudeSeats(settings, claudeSeatLimitsService, input.force === true),
+                catch: (cause) =>
+                  new ClaudeSeatsError({ message: `seat meters unreachable: ${String(cause)}` }),
+              });
+              return { seats };
+            }),
+            { "rpc.aggregate": "router" },
           ),
         [WS_METHODS.routerAccounts]: (input) =>
           observeRpcEffect(

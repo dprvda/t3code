@@ -1,4 +1,5 @@
 import type {
+  ClaudeSeatRow,
   EnvironmentId,
   RouterAccountRow,
   RouterLoginProvider,
@@ -172,6 +173,119 @@ function LoginFlow({ environmentId }: { readonly environmentId: EnvironmentId })
   );
 }
 
+const SEAT_STATE_STYLE: Record<ClaudeSeatRow["state"], { label: string; className: string }> = {
+  ready: {
+    label: "READY",
+    className: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300/90",
+  },
+  cooling: { label: "COOLING", className: "bg-amber-500/15 text-amber-600 dark:text-amber-300/90" },
+  unknown: { label: "UNKNOWN", className: "bg-muted text-secondary-label" },
+};
+
+/**
+ * Claude rotation seats (accounts HOT/COOLING view): one row per claudeAgent
+ * instance in a continuation group, with the official meters and the derived
+ * ready/cooling state. Hidden entirely when no rotation group is configured.
+ */
+function ClaudeSeatsSection({ environmentId }: { readonly environmentId: EnvironmentId }) {
+  const fetchSeats = useAtomQueryRunner(routerPoolEnvironment.claudeSeats, {
+    reportFailure: false,
+  });
+  const [seats, setSeats] = useState<readonly ClaudeSeatRow[] | null>(null);
+  const nowMs = useRelativeTimeTick(30_000);
+
+  const refresh = useCallback(
+    (force = false) => {
+      void (async () => {
+        const result = await fetchSeats({ environmentId, input: { force } });
+        if (result._tag === "Success") setSeats(result.value.seats);
+      })();
+    },
+    [environmentId, fetchSeats],
+  );
+
+  useEffect(() => {
+    refresh();
+    const id = setInterval(() => refresh(), 60_000);
+    return () => clearInterval(id);
+  }, [refresh]);
+
+  if (seats === null || seats.length === 0) return null;
+
+  return (
+    <SettingsSection
+      title="Claude Rotation Seats"
+      headerAction={
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          aria-label="Refresh rotation seats"
+          onClick={() => refresh(true)}
+        >
+          <RefreshCwIcon className="size-3.5" />
+        </Button>
+      }
+    >
+      <div className="px-3 text-secondary-label text-xs sm:px-4">
+        The Max-seat rotation pool: COOLING means a usage meter is at its cap and the seat waits for
+        the window reset; the rotation reactor skips it until then.
+      </div>
+      <div className="space-y-2 px-3 sm:px-4">
+        {seats.map((seat) => {
+          const style = SEAT_STATE_STYLE[seat.state];
+          return (
+            <div
+              key={seat.instanceId}
+              className={cn("rounded-md border border-border p-3", !seat.enabled && "opacity-50")}
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className={cn("rounded px-1.5 py-0.5 font-medium text-[10px]", style.className)}
+                >
+                  {style.label}
+                </span>
+                <span className="font-medium text-sm">{seat.displayName ?? seat.instanceId}</span>
+                <span className="text-secondary-label text-xs">{seat.group}</span>
+                {seat.state === "cooling" ? (
+                  <span className="text-amber-600 text-xs dark:text-amber-300/90">
+                    {seat.blockedLabel} capped
+                    {seat.resetsAt !== null
+                      ? ` · resets ${fmtReset(seat.resetsAt)} · ${fmtCountdown(seat.resetsAt, nowMs)}`
+                      : ""}
+                  </span>
+                ) : null}
+              </div>
+              {seat.bars.length > 0 ? (
+                <div className="mt-2 space-y-1">
+                  {seat.bars.map((bar) => (
+                    <div key={bar.label} className="flex items-center gap-2 text-xs">
+                      <span className="w-20 shrink-0 truncate text-[10px] text-secondary-label uppercase">
+                        {bar.label}
+                      </span>
+                      <div className="h-1.5 w-32 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className={cn("h-full", barTone(bar.pct))}
+                          style={{ width: `${Math.min(100, bar.pct)}%` }}
+                        />
+                      </div>
+                      <span className="tabular-nums" title={bar.resetsAt ?? undefined}>
+                        {bar.pct}%
+                      </span>
+                      <span className="text-secondary-label">
+                        {fmtReset(bar.resetsAt)} · {fmtCountdown(bar.resetsAt, nowMs)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </SettingsSection>
+  );
+}
+
 export function RouterPoolPanel() {
   const environmentId = useActiveEnvironmentId();
   const fetchAccounts = useAtomQueryRunner(routerPoolEnvironment.accounts, {
@@ -287,6 +401,7 @@ export function RouterPoolPanel() {
           )}
         </div>
       </SettingsSection>
+      {environmentId !== null ? <ClaudeSeatsSection environmentId={environmentId} /> : null}
       {environmentId !== null ? (
         <SettingsSection title="Add Account">
           <div className="px-3 text-secondary-label text-xs sm:px-4">

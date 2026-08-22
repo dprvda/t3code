@@ -132,6 +132,7 @@ import {
   RouterLoginStatusInput,
   RouterPoolError,
 } from "./routerPool.ts";
+import { ClaudeSeatsError, ClaudeSeatsInput, ClaudeSeatsResult } from "./claudeSeats.ts";
 import {
   SubagentListInput,
   SubagentListResult,
@@ -230,6 +231,7 @@ export const WS_METHODS = {
 
   // CLIProxyAPI router pool methods
   routerAccounts: "router.accounts",
+  claudeSeats: "claudeSeats.list",
   routerAccountToggle: "router.accountToggle",
   routerLoginStart: "router.loginStart",
   routerLoginStatus: "router.loginStatus",
@@ -698,6 +700,12 @@ export const WsProjectsLaunchDocsSetRpc = Rpc.make(WS_METHODS.projectsLaunchDocs
   error: Schema.Union([ProjectLaunchDocsError, EnvironmentAuthorizationError]),
 });
 
+export const WsClaudeSeatsRpc = Rpc.make(WS_METHODS.claudeSeats, {
+  payload: ClaudeSeatsInput,
+  success: ClaudeSeatsResult,
+  error: Schema.Union([ClaudeSeatsError, EnvironmentAuthorizationError]),
+});
+
 export const WsRouterAccountsRpc = Rpc.make(WS_METHODS.routerAccounts, {
   payload: RouterAccountsInput,
   success: RouterAccountsResult,
@@ -1128,6 +1136,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsDocMapRpc,
   WsProjectsLaunchDocsGetRpc,
   WsProjectsLaunchDocsSetRpc,
+  WsClaudeSeatsRpc,
   WsRouterAccountsRpc,
   WsRouterAccountToggleRpc,
   WsRouterLoginStartRpc,
