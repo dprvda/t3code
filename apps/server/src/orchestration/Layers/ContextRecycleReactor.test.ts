@@ -110,6 +110,7 @@ describe("ContextRecycleReactor", () => {
   async function createHarness(input?: {
     readonly thresholdTokens?: number;
     readonly enabled?: boolean;
+    readonly maxTurns?: number;
   }) {
     const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-recycle-"));
     createdDirs.add(baseDir);
@@ -160,6 +161,7 @@ describe("ContextRecycleReactor", () => {
       contextRecycle: {
         enabled: input?.enabled ?? true,
         thresholdTokens: input?.thresholdTokens ?? 600_000,
+        ...(input?.maxTurns !== undefined ? { maxTurns: input.maxTurns } : {}),
       },
     });
     const layer = ContextRecycleReactorLive.pipe(
@@ -329,6 +331,30 @@ describe("ContextRecycleReactor", () => {
       (entry) => entry.kind === "context-recycle.handoff-requested",
     );
     expect(requested).toBeDefined();
+  });
+
+  it("maxTurns: the Nth completed turn requests a handoff without a token crossing", async () => {
+    const harness = await createHarness({ maxTurns: 2 });
+    await harness.emitTurnCompletedFor("evt-turncount-1", "turn-a");
+    await harness.drain();
+    expect(await harness.messagesWith(STANDARD_HANDOFF_PROMPT)).toHaveLength(0);
+    await harness.emitTurnCompletedFor("evt-turncount-2", "turn-b");
+    await waitFor(async () => (await harness.messagesWith(STANDARD_HANDOFF_PROMPT)).length === 1);
+    await harness.drain();
+    const thread = await harness.readThread();
+    const requested = thread.activities.find(
+      (entry) => entry.kind === "context-recycle.handoff-requested",
+    );
+    expect(requested?.summary).toContain("Session ran 2 turns");
+  });
+
+  it("maxTurns 0 (default) never recycles by turn count", async () => {
+    const harness = await createHarness();
+    for (let index = 0; index < 5; index += 1) {
+      await harness.emitTurnCompletedFor(`evt-noturncount-${index}`, `turn-${index}`);
+    }
+    await harness.drain();
+    expect(await harness.messagesWith(STANDARD_HANDOFF_PROMPT)).toHaveLength(0);
   });
 
   it("marker + handoff completion recycles: stop, cleared cursor, successor turn", async () => {

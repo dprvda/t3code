@@ -573,6 +573,14 @@ export const ContextRecycleSettings = Schema.Struct({
   thresholdTokens: Schema.Int.check(
     Schema.isBetween({ minimum: 100_000, maximum: 1_000_000 }),
   ).pipe(Schema.withDecodingDefault(Effect.succeed(600_000))),
+  /**
+   * Turn-count recycle: recycle a session once it has run this many full
+   * turns, even below the token threshold (long routed conversations degrade
+   * before the window fills). 0 disables the turn-count trigger.
+   */
+  maxTurns: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 1_000 })).pipe(
+    Schema.withDecodingDefault(Effect.succeed(0)),
+  ),
 });
 export type ContextRecycleSettings = typeof ContextRecycleSettings.Type;
 
@@ -887,6 +895,7 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       enabled: Schema.optionalKey(Schema.Boolean),
       thresholdTokens: Schema.optionalKey(Schema.Int),
+      maxTurns: Schema.optionalKey(Schema.Int),
     }),
   ),
   observability: Schema.optionalKey(

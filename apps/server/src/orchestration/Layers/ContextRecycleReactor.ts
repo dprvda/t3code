@@ -92,6 +92,11 @@ const make = Effect.gen(function* () {
   const serverSettings = yield* ServerSettingsService;
 
   const states = new Map<string, RecyclePhase>();
+  // Completed turns per thread since the last recycle (or server start).
+  // Feeds the turn-count trigger; reset when a recycle finalizes so the
+  // successor session starts a fresh budget. In-memory on purpose: a server
+  // restart resetting the count only delays a recycle, never forces one.
+  const completedTurnCounts = new Map<string, number>();
 
   const resolveThread = Effect.fnUntraced(function* (threadId: ThreadId) {
     return yield* projectionSnapshotQuery
@@ -164,6 +169,7 @@ const make = Effect.gen(function* () {
     pct: number,
     causeEventId: string,
     turnId: TurnId | null,
+    summaryOverride?: string,
   ) {
     states.set(String(threadId), {
       phase: "awaiting-handoff",
@@ -177,9 +183,10 @@ const make = Effect.gen(function* () {
       tone: "info",
       kind: "context-recycle.handoff-requested",
       summary:
-        pct < 0
+        summaryOverride ??
+        (pct < 0
           ? "Manual recycle — requesting handoff"
-          : `Context at ${Math.round(pct / 1000)}k tokens — requesting handoff`,
+          : `Context at ${Math.round(pct / 1000)}k tokens — requesting handoff`),
       payload: { pct },
       createdAt: yield* nowIso,
     });
@@ -232,6 +239,7 @@ const make = Effect.gen(function* () {
       text: SUCCESSOR_RESUME_PROMPT,
     });
     states.set(String(threadId), { phase: "cooldown" });
+    completedTurnCounts.delete(String(threadId));
   });
 
   // Manual recycle: skip the enabled/threshold gate — the user asked for it.
@@ -302,7 +310,32 @@ const make = Effect.gen(function* () {
 
     // turn.completed
     const state = states.get(threadKey);
-    if (state === undefined || state.phase === "cooldown") return;
+    if (state === undefined || state.phase === "cooldown") {
+      if (event.payload.state !== "completed") return;
+      const completedTurns = (completedTurnCounts.get(threadKey) ?? 0) + 1;
+      completedTurnCounts.set(threadKey, completedTurns);
+      // Turn-count trigger: a session that has run maxTurns full turns gets
+      // recycled at this boundary even below the token threshold. A thread
+      // in cooldown only counts (a recycle just happened).
+      if (state?.phase === "cooldown") return;
+      const settings = yield* serverSettings.getSettings.pipe(
+        Effect.option,
+        Effect.map(Option.getOrUndefined),
+      );
+      if (settings === undefined || !settings.contextRecycle.enabled) return;
+      const maxTurns = settings.contextRecycle.maxTurns;
+      if (maxTurns <= 0 || completedTurns < maxTurns) return;
+      const thread = yield* resolveThread(threadId);
+      if (!thread) return;
+      yield* requestHandoff(
+        threadId,
+        -1,
+        String(event.eventId),
+        turnId,
+        `Session ran ${completedTurns} turns — requesting handoff`,
+      );
+      return;
+    }
     if (state.phase === "armed") {
       if (event.payload.state !== "completed") {
         // interrupted/failed/cancelled turn: stand down, the thread is not in

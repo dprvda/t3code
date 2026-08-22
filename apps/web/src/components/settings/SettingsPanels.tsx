@@ -1651,6 +1651,40 @@ function ContextRecycleThresholdSlider({
   );
 }
 
+function RecycleMaxTurnsInput({
+  value,
+  onCommit,
+}: {
+  value: number;
+  onCommit: (maxTurns: number) => void;
+}) {
+  // Same draft pattern as AutoSettleDaysInput: commit only valid integers,
+  // snap back to the persisted value on blur. 0 disables the trigger.
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+
+  return (
+    <Input
+      type="number"
+      min={0}
+      max={1000}
+      className="w-full sm:w-24"
+      value={draft}
+      onChange={(event) => {
+        setDraft(event.target.value);
+        const parsed = Number(event.target.value);
+        if (Number.isInteger(parsed) && parsed >= 0 && parsed <= 1000) {
+          onCommit(parsed);
+        }
+      }}
+      onBlur={() => setDraft(String(value))}
+      aria-label="Turns before turn-count recycle"
+    />
+  );
+}
+
 function AutoSettleDaysInput({
   value,
   onCommit,
@@ -2001,6 +2035,18 @@ export function GeneralSettingsPanel() {
                 onCommit={(thresholdTokens) =>
                   updateSettings({ contextRecycle: { thresholdTokens } })
                 }
+              />
+            }
+          />
+        ) : null}
+        {settings.contextRecycle.enabled ? (
+          <SettingsRow
+            title="Turn-count recycle"
+            description="Also recycle after this many full turns, even below the token threshold. 0 turns it off."
+            control={
+              <RecycleMaxTurnsInput
+                value={settings.contextRecycle.maxTurns}
+                onCommit={(maxTurns) => updateSettings({ contextRecycle: { maxTurns } })}
               />
             }
           />
