@@ -419,6 +419,47 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect(
+    "appends the launch doctrine: AFK authority always, router lane for routed models",
+    () => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          modelSelection: createModelSelection(
+            ProviderInstanceId.make("claudeAgent"),
+            "claude-opus-4-6",
+          ),
+          runtimeMode: "full-access",
+        });
+        const appendOf = (prompt: ClaudeQueryOptions["systemPrompt"]): string =>
+          typeof prompt === "object" && !Array.isArray(prompt) ? (prompt.append ?? "") : "";
+        const claudeLaunch = harness.getLastCreateQueryInput();
+        const claudeAppend = appendOf(claudeLaunch?.options.systemPrompt);
+        assert.match(claudeAppend, /Full-AFK authority/);
+        assert.notMatch(claudeAppend, /Routed-model lane/);
+
+        yield* adapter.startSession({
+          threadId: ThreadId.make("thread-routed"),
+          provider: ProviderDriverKind.make("claudeAgent"),
+          modelSelection: createModelSelection(
+            ProviderInstanceId.make("claudeAgent"),
+            "gpt-5.6-sol",
+          ),
+          runtimeMode: "full-access",
+        });
+        const routedAppend = appendOf(harness.getLastCreateQueryInput()?.options.systemPrompt);
+        assert.match(routedAppend, /Full-AFK authority/);
+        assert.match(routedAppend, /Routed-model lane/);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
   it.effect("forwards claude effort levels into query options", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
