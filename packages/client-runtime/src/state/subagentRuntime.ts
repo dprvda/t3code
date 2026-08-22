@@ -835,7 +835,7 @@ export function deriveAgentPanelModel({
     else if (agent.status === "waiting") waitingCount += 1;
     else if (agent.status === "idle") idleCount += 1;
     else settledCount += 1;
-    totalTokens += agent.usage?.totalTokens ?? 0;
+    totalTokens += subagentWorkTokens(agent.usage);
   }
 
   return {
@@ -927,6 +927,20 @@ export function formatSubagentModelLabel(
     .replace(/-\d{8}$/, "")
     .replace(/-latest$/, "");
   return effort ? `${compact} · ${effort}` : compact;
+}
+
+/**
+ * Tokens that measure work done, excluding cached input re-reads.
+ *
+ * `totalTokens` sums every field of every message, cache reads included. An
+ * agent working a large context re-reads that same context on every call, so
+ * the sum counts it hundreds of times and reaches hundreds of millions — a
+ * figure that reads as size but measures nothing. Subtracting cache reads
+ * leaves fresh input, cache writes and output.
+ */
+export function subagentWorkTokens(usage: SubagentUsage | null | undefined): number {
+  if (usage === null || usage === undefined) return 0;
+  return Math.max(0, usage.totalTokens - (usage.cachedInputTokens ?? 0));
 }
 
 export function formatSubagentTokenCount(totalTokens: number): string {

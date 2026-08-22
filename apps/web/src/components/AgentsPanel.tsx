@@ -20,6 +20,7 @@ import type {
 import {
   formatSubagentModelLabel,
   formatSubagentTokenCount,
+  subagentWorkTokens,
 } from "@t3tools/client-runtime/state/subagentRuntime";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { Bot, Braces, Check, ChevronDown, ChevronRight, X } from "lucide-react";
@@ -155,7 +156,7 @@ function AgentRow({
       : agent.role;
   const metadata = [
     modelLabel,
-    agent.usage ? `${formatSubagentTokenCount(agent.usage.totalTokens)} tok` : "— tok",
+    agent.usage ? `${formatSubagentTokenCount(subagentWorkTokens(agent.usage))} tok` : "— tok",
     agent.usage?.toolUses !== undefined ? `${agent.usage.toolUses} tools` : null,
     agent.activationCount > 1 ? `run ${agent.activationCount}` : null,
   ].filter((value): value is string => value !== null);

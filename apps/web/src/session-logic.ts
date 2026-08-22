@@ -970,7 +970,8 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     }
   }
   if (itemType === "file_change") {
-    const fileEdit = extractFileEditFromToolData(asRecord(payload?.data));
+    const data = asRecord(payload?.data);
+    const fileEdit = extractFileEditFromToolData(data) ?? extractFileEditFromCodexChanges(data);
     if (fileEdit) {
       entry.fileEdit = fileEdit;
     }
@@ -1587,6 +1588,38 @@ function extractToolOutput(payload: Record<string, unknown> | null): string | nu
     }
   }
 
+  return null;
+}
+
+/**
+ * Structured before/after from a Codex `file_change` item, whose edits arrive
+ * as `data.item.changes[]` — one unified diff per path — instead of Claude's
+ * `data.input` string pair. Only the -/+ lines are kept: the timeline renders
+ * old/new as a red/green block and counts their lines as deletions/additions,
+ * so carrying context lines would inflate both sides.
+ */
+function extractFileEditFromCodexChanges(
+  data: Record<string, unknown> | null,
+): WorkLogEntry["fileEdit"] | null {
+  const item = asRecord(data?.item);
+  const changes = Array.isArray(item?.changes) ? item.changes : null;
+  if (!changes) return null;
+  for (const rawChange of changes) {
+    const change = asRecord(rawChange);
+    const path = asTrimmedString(change?.path);
+    const diff = typeof change?.diff === "string" ? change.diff : null;
+    if (!path || diff === null) continue;
+    const removed: string[] = [];
+    const added: string[] = [];
+    for (const line of diff.split("\n")) {
+      // Hunk headers and the ---/+++ file markers are not content.
+      if (line.startsWith("@@") || line.startsWith("---") || line.startsWith("+++")) continue;
+      if (line.startsWith("-")) removed.push(line.slice(1));
+      else if (line.startsWith("+")) added.push(line.slice(1));
+    }
+    if (removed.length === 0 && added.length === 0) continue;
+    return { path, oldText: removed.join("\n"), newText: added.join("\n") };
+  }
   return null;
 }
 

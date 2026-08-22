@@ -1439,6 +1439,57 @@ describe("deriveWorkLogEntries", () => {
     ]);
   });
 
+  it("builds a file edit from a Codex file_change unified diff", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "codex-file-change",
+        kind: "tool.completed",
+        summary: "File change",
+        payload: {
+          itemType: "file_change",
+          data: {
+            item: {
+              changes: [
+                {
+                  path: "/home/dprvd/work/app/styles.css",
+                  kind: { move_path: null, type: "update" },
+                  diff: "@@ -173,2 +173,3 @@\n .cover { color: red; }\n-.old { display: none; }\n+.new { display: grid; }\n+.also-new { gap: 4px; }",
+                },
+              ],
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    // Context lines are excluded: the timeline counts old/new lines as
+    // deletions/additions, so only the -/+ content belongs here.
+    expect(entry?.fileEdit).toEqual({
+      path: "/home/dprvd/work/app/styles.css",
+      oldText: ".old { display: none; }",
+      newText: ".new { display: grid; }\n.also-new { gap: 4px; }",
+    });
+  });
+
+  it("leaves fileEdit unset when a Codex change carries no diff", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "codex-file-change-no-diff",
+        kind: "tool.completed",
+        summary: "File change",
+        payload: {
+          itemType: "file_change",
+          data: { item: { changes: [{ path: "apps/web/src/a.ts" }] } },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.fileEdit).toBeUndefined();
+    expect(entry?.changedFiles).toEqual(["apps/web/src/a.ts"]);
+  });
+
   it("drops duplicated tool detail when it only repeats the title", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

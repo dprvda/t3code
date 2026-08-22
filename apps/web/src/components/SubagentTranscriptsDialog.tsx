@@ -54,7 +54,10 @@ export function SubagentTranscriptsDialog({
       const result = await fetchRuns({ environmentId, input: { threadId } });
       if (result._tag === "Success") {
         setRuns(result.value.runs);
-        if (result.value.runs.length === 0) setError("No subagent runs recorded for this thread.");
+        if (result.value.runs.length === 0)
+          setError(
+            "No subagent transcripts stored for this thread. Runs that finished before transcript recording was enabled are not backfilled — the Agents panel may still list them.",
+          );
       } else {
         setRuns([]);
         setError("Subagent runs unavailable for this thread.");

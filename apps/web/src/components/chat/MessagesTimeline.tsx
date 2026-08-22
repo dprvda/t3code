@@ -1565,6 +1565,9 @@ function summarizeWorkGroupStats(entries: ReadonlyArray<TimelineWorkEntry>): {
     const action = toolGroupAction(entry);
     if (entry.fileEdit) {
       edited.add(entry.fileEdit.path);
+      // One Codex file_change can carry several paths while fileEdit holds the
+      // first; without these the group would report one file instead of all.
+      for (const path of entry.changedFiles ?? []) edited.add(path);
       const lineStats = fileEditLineStats(entry.fileEdit);
       additions += lineStats.additions;
       deletions += lineStats.deletions;

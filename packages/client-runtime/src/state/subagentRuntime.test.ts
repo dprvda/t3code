@@ -6,6 +6,7 @@ import {
   formatSubagentModelLabel,
   formatSubagentTokenCount,
   isAgentAttributedToolActivity,
+  subagentWorkTokens,
   isSubagentActivityKind,
   isTimelineBypassActivity,
   workflowCardMembers,
@@ -875,5 +876,30 @@ describe("nested agents vs subagent shells", () => {
       }),
     ]);
     expect(agents.map((agent) => agent.id)).toEqual(["nested-1"]);
+  });
+});
+
+describe("subagentWorkTokens", () => {
+  it("excludes cached input re-reads so a long run does not report hundreds of millions", () => {
+    // A real long-running agent: ~290M of totalTokens is the same cached
+    // context counted once per call. Only fresh work should surface.
+    expect(
+      subagentWorkTokens({
+        totalTokens: 289_600_000,
+        cachedInputTokens: 289_000_000,
+        outputTokens: 400_000,
+      }),
+    ).toBe(600_000);
+  });
+
+  it("falls back to the full total when the provider reports no cached tokens", () => {
+    expect(subagentWorkTokens({ totalTokens: 40_920 })).toBe(40_920);
+  });
+
+  it("never returns a negative count and treats missing usage as zero", () => {
+    expect(subagentWorkTokens({ totalTokens: 100, cachedInputTokens: 500 })).toBe(0);
+    expect(subagentWorkTokens(undefined)).toBe(0);
+    // Folded agents carry a null usage until a provider reports one.
+    expect(subagentWorkTokens(null)).toBe(0);
   });
 });
