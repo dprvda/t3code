@@ -1665,6 +1665,102 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("routed lane: configured context window and observed subagent usage backfill", () => {
+    const harness = makeHarness({ claudeConfig: { contextWindowTokens: 1_000_000 } });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      // streamEvents delivers each event to one consumer: a single
+      // collector runs until the terminal task.completed sentinel.
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil((event) => event.type === "task.completed"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId: session.threadId, input: "spawn", attachments: [] });
+
+      harness.query.emit({
+        type: "system",
+        subtype: "task_started",
+        task_id: "task-routed",
+        description: "Routed agent",
+        task_type: "local_agent",
+        tool_use_id: "toolu_routed_1",
+        uuid: "task-routed-uuid",
+        session_id: "sdk-session",
+      } as unknown as SDKMessage);
+
+      // The routed stream forwards the subagent's assistant snapshots with
+      // real per-message usage; repeated lines of one message repeat it.
+      const forwardedAssistant = (uuid: string, id: string, usage: Record<string, number>) =>
+        harness.query.emit({
+          type: "assistant",
+          parent_tool_use_id: "toolu_routed_1",
+          message: { id, model: "gpt-5.6-sol", usage, content: [] },
+          uuid,
+          session_id: "sdk-session",
+        } as unknown as SDKMessage);
+      // streaming placeholder — no spend, never counted
+      forwardedAssistant("fa-1", "msg_1", { input_tokens: 0, output_tokens: 0 });
+      forwardedAssistant("fa-2", "msg_2", { input_tokens: 18_536, output_tokens: 195 });
+      // second line of the same message — deduped by message id
+      forwardedAssistant("fa-3", "msg_2", { input_tokens: 18_536, output_tokens: 195 });
+      forwardedAssistant("fa-4", "msg_3", {
+        input_tokens: 4_222,
+        cache_read_input_tokens: 17_920,
+        output_tokens: 47,
+      });
+
+      // Parent-thread usage tick without a provider max: the configured
+      // instance budget must backfill maxTokens.
+      harness.query.emit({
+        type: "system",
+        subtype: "task_progress",
+        task_id: "task-routed",
+        description: "Routed agent",
+        usage: { total_tokens: 5_000 },
+        uuid: "task-routed-progress-uuid",
+        session_id: "sdk-session",
+      } as unknown as SDKMessage);
+      // The CLI's own task accumulator reports zero total on this lane.
+      harness.query.emit({
+        type: "system",
+        subtype: "task_notification",
+        task_id: "task-routed",
+        status: "completed",
+        summary: "done",
+        usage: { total_tokens: 0, tool_uses: 1 },
+        uuid: "task-routed-done-uuid",
+        session_id: "sdk-session",
+      } as unknown as SDKMessage);
+
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      const usageEvent = events.find((event) => event.type === "thread.token-usage.updated");
+      const usagePayload = usageEvent?.payload as { usage?: { maxTokens?: number } } | undefined;
+      assert.equal(usagePayload?.usage?.maxTokens, 1_000_000);
+
+      const completed = events.find((event) => event.type === "task.completed");
+      assert.equal(completed?.type, "task.completed");
+      if (completed?.type === "task.completed") {
+        const typedUsage = (
+          completed.payload as { typedUsage?: { totalTokens?: number; toolUses?: number } }
+        ).typedUsage;
+        // 18_536+195 (msg_2 once) + 4_222+17_920+47 (msg_3)
+        assert.equal(typedUsage?.totalTokens, 40_920);
+        assert.equal(typedUsage?.toolUses, 1);
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("workflow member coalescing: identical snapshots suppress, changes emit", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

@@ -239,6 +239,14 @@ interface ClaudeTaskAgentState {
    * assistant snapshots (authoritative API model). */
   model: string | undefined;
   effort: string | undefined;
+  /**
+   * Per-API-message total tokens observed on the subagent's forwarded
+   * assistant snapshots (last write per message id wins — a message's lines
+   * repeat its usage). Fallback source for task usage on the router lane,
+   * where the CLI's own task accumulator reports 0/absent because the
+   * routed stream carries no message_delta usage.
+   */
+  observedUsageByMessageId?: Map<string, number> | undefined;
 }
 
 interface ClaudeSessionContext {
@@ -980,6 +988,43 @@ function normalizeTaskUsage(usage: unknown): RuntimeTaskUsage | undefined {
     ...(toolUses !== undefined ? { toolUses } : {}),
     ...(durationMs !== undefined ? { durationMs } : {}),
   };
+}
+
+/** input + cache-write + cache-read + output of one API message's usage. */
+function claudeMessageTotalTokens(usage: unknown): number | undefined {
+  if (!usage || typeof usage !== "object") {
+    return undefined;
+  }
+  const record = usage as Record<string, unknown>;
+  const total = claudeUsageInputTokens(record) + claudeUsageOutputTokens(record);
+  return total > 0 ? total : undefined;
+}
+
+/**
+ * Router-lane fallback: when the CLI's task usage is absent or zero, total
+ * the usage observed on the subagent's own assistant snapshots instead. The
+ * routed stream carries per-message usage but no message_delta accumulation,
+ * so the CLI reports "0 tok" next to a Claude sibling's real count.
+ */
+function withObservedTaskUsage(
+  typedUsage: RuntimeTaskUsage | undefined,
+  agent: ClaudeTaskAgentState | undefined,
+): RuntimeTaskUsage | undefined {
+  if (typedUsage !== undefined && typedUsage.totalTokens > 0) {
+    return typedUsage;
+  }
+  const observed = agent?.observedUsageByMessageId;
+  if (observed === undefined || observed.size === 0) {
+    return typedUsage;
+  }
+  let totalTokens = 0;
+  for (const value of observed.values()) {
+    totalTokens += value;
+  }
+  if (totalTokens <= 0) {
+    return typedUsage;
+  }
+  return { ...(typedUsage ?? {}), totalTokens };
 }
 
 /** SDK task_updated patch status → the shared wire vocabulary. */
@@ -2079,6 +2124,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       return;
     }
 
+    // Single choke point for every usage emit: snapshots built without a
+    // provider-reported max (routed models) still carry the session's known
+    // window so ContextWindowMeter and the pct ring can render "used / max".
+    if (usage.maxTokens === undefined && context.lastKnownContextWindow !== undefined) {
+      usage = { ...usage, maxTokens: context.lastKnownContextWindow };
+    }
+
     context.lastKnownTokenUsage = usage;
     context.lastKnownTotalProcessedTokens =
       usage.totalProcessedTokens ?? context.lastKnownTotalProcessedTokens;
@@ -2127,7 +2179,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       return undefined;
     }
 
-    context.lastKnownContextWindow = usage.maxTokens;
+    // Keep the configured fallback when the SDK reports no usable max
+    // (routed models return 0/undefined here).
+    context.lastKnownContextWindow =
+      finitePositiveInteger(usage.maxTokens) ?? context.lastKnownContextWindow;
     return normalizeClaudeContextUsageApiSnapshot(usage, totalProcessedTokens);
   });
 
@@ -2898,6 +2953,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       if (owningAgent && snapshotModel) {
         owningAgent.model = snapshotModel;
       }
+      if (owningAgent) {
+        const apiMessage = message.message as { id?: unknown; usage?: unknown };
+        const messageId = trimmedString(apiMessage.id);
+        const observedTotal = claudeMessageTotalTokens(apiMessage.usage);
+        if (messageId !== undefined && observedTotal !== undefined) {
+          owningAgent.observedUsageByMessageId ??= new Map();
+          owningAgent.observedUsageByMessageId.set(messageId, observedTotal);
+        }
+      }
       context.lastAssistantUuid = message.uuid;
       yield* updateResumeCursor(context);
       return;
@@ -3236,6 +3300,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           owningAgentId,
           model,
           effort,
+          observedUsageByMessageId: context.taskAgents.get(message.task_id)
+            ?.observedUsageByMessageId,
         });
         context.liveTaskIds.add(message.task_id);
         yield* offerRuntimeEvent({
@@ -3266,7 +3332,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           },
         );
         const linkage = taskLinkageFor(context.taskAgents, message.task_id);
-        const typedUsage = normalizeTaskUsage(message.usage);
+        const typedUsage = withObservedTaskUsage(
+          normalizeTaskUsage(message.usage),
+          context.taskAgents.get(message.task_id),
+        );
         // Phases ride on the coordinator's ONE progress row per tick. A
         // separate phases-only row shared the stable ingestion activity id
         // with this full row, and the thinner upsert overwrote usage and
@@ -3332,7 +3401,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             rawPayload: message,
           },
         );
-        const typedUsage = normalizeTaskUsage(message.usage);
+        const typedUsage = withObservedTaskUsage(
+          normalizeTaskUsage(message.usage),
+          context.taskAgents.get(message.task_id),
+        );
         yield* offerRuntimeEvent({
           ...base,
           type: "task.completed",
@@ -4131,7 +4203,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const caps = getClaudeModelCapabilities(modelSelection?.model);
       const descriptors = getProviderOptionDescriptors({ caps });
       const apiModelId = modelSelection ? resolveClaudeApiModelId(modelSelection) : undefined;
-      const initialContextWindow = selectedClaudeContextWindow(modelSelection);
+      // Routed models (router lane) are unknown to the model catalog and
+      // expose no contextWindow option; the instance's configured budget —
+      // already exported to the CLI as CLAUDE_CODE_MAX_CONTEXT_TOKENS — is
+      // the real max, so meters get it as the fallback.
+      const initialContextWindow =
+        selectedClaudeContextWindow(modelSelection) ??
+        finitePositiveInteger(claudeSettings.contextWindowTokens);
       const rawEffort = getModelSelectionStringOptionValue(modelSelection, "effort");
       const effort = resolveClaudeEffort(caps, rawEffort) ?? null;
       const fastModeSupported = descriptors.some(
