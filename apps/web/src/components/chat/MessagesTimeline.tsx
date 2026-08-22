@@ -50,8 +50,12 @@ import {
   ChevronRightIcon,
   CircleAlertIcon,
   EyeIcon,
+  FlaskConicalIcon,
+  GitBranchIcon,
   GlobeIcon,
   HammerIcon,
+  PackageIcon,
+  Trash2Icon,
   MessageCircleIcon,
   MousePointerClickIcon,
   PaintbrushIcon,
@@ -2133,8 +2137,12 @@ type WorkEntryIconName =
   | "check"
   | "circle-alert"
   | "eye"
+  | "flask"
+  | "git-branch"
   | "globe"
   | "hammer"
+  | "package"
+  | "trash"
   | "message-circle"
   | "search"
   | "square-pen"
@@ -2153,8 +2161,16 @@ function WorkEntryIconSvg({ name, className }: { name: WorkEntryIconName; classN
       return <CircleAlertIcon className={className} aria-hidden />;
     case "eye":
       return <EyeIcon className={className} aria-hidden />;
+    case "flask":
+      return <FlaskConicalIcon className={className} aria-hidden />;
+    case "git-branch":
+      return <GitBranchIcon className={className} aria-hidden />;
     case "globe":
       return <GlobeIcon className={className} aria-hidden />;
+    case "package":
+      return <PackageIcon className={className} aria-hidden />;
+    case "trash":
+      return <Trash2Icon className={className} aria-hidden />;
     case "hammer":
       return <HammerIcon className={className} aria-hidden />;
     case "message-circle":
@@ -2422,13 +2438,14 @@ function buildToolCallExpandedBody(
     blocks.push(`MCP call\n${JSON.stringify(workEntry.toolData, null, 2)}`);
   }
   const raw = workEntryRawCommand(workEntry);
-  if (raw?.trim()) {
-    blocks.push(raw.trim());
-  } else if (workEntry.command?.trim()) {
-    blocks.push(workEntry.command.trim());
+  const commandBlock = raw?.trim() || workEntry.command?.trim() || "";
+  if (commandBlock) {
+    blocks.push(commandBlock);
   }
-  if (workEntry.detail?.trim()) {
-    blocks.push(workEntry.detail.trim());
+  const detail = workEntry.detail?.trim();
+  // "Bash: <command>" details just repeat the command block above.
+  if (detail && !(commandBlock && detail.endsWith(commandBlock))) {
+    blocks.push(detail);
   }
   const changedFiles = workEntry.changedFiles ?? [];
   if (changedFiles.length > 0) {
@@ -2444,7 +2461,74 @@ function buildToolCallExpandedBody(
 const toolCallExpandedBodyClassName =
   "max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-secondary-label text-[length:var(--font-size-code,0.6875rem)] leading-relaxed select-text";
 
+/**
+ * Icon for a shell command by what it actually runs: the first token after
+ * leading `cd .. &&` hops and VAR=... assignments picks the program.
+ */
+function commandIconName(command: string): WorkEntryIconName {
+  let rest = command.trim();
+  for (let hops = 0; hops < 4; hops += 1) {
+    const cdHop = /^cd\s+[^&;|]+(?:&&|;)\s*/u.exec(rest);
+    if (cdHop) {
+      rest = rest.slice(cdHop[0].length).trimStart();
+      continue;
+    }
+    const assignment = /^[A-Za-z_][A-Za-z0-9_]*=\S+\s+/u.exec(rest);
+    if (assignment) {
+      rest = rest.slice(assignment[0].length);
+      continue;
+    }
+    break;
+  }
+  const program = rest.split(/\s+/u, 1)[0]?.replace(/^.*\//u, "") ?? "";
+  switch (program) {
+    case "git":
+    case "gh":
+      return "git-branch";
+    case "grep":
+    case "rg":
+    case "find":
+    case "fd":
+    case "ag":
+      return "search";
+    case "ls":
+    case "cat":
+    case "head":
+    case "tail":
+    case "less":
+    case "wc":
+      return "eye";
+    case "pnpm":
+    case "npm":
+    case "yarn":
+    case "bun":
+    case "npx":
+    case "pip":
+    case "pip3":
+    case "cargo":
+    case "vp":
+      return "package";
+    case "vitest":
+    case "jest":
+    case "pytest":
+    case "playwright":
+      return "flask";
+    case "curl":
+    case "wget":
+      return "globe";
+    case "rm":
+    case "rmdir":
+      return "trash";
+    default:
+      return "terminal";
+  }
+}
+
 function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
+  const command = workEntry.command?.trim() ?? workEntry.rawCommand?.trim();
+  if ((workEntry.itemType === "command_execution" || workEntry.command) && command) {
+    return commandIconName(command);
+  }
   if (
     workEntry.sourceActivityKind === "user-input.requested" ||
     workEntry.sourceActivityKind === "user-input.resolved"

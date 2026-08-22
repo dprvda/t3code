@@ -306,6 +306,9 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       return HttpServerResponse.uint8Array(indexData, {
         status: 200,
         contentType: "text/html; charset=utf-8",
+        // SPA entry: always revalidate so a redeploy reaches clients on the
+        // next plain reload (assets below are hash-named and cache forever).
+        headers: { "cache-control": "no-cache" },
       });
     }
 
@@ -315,9 +318,13 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       return HttpServerResponse.text("Internal Server Error", { status: 500 });
     }
 
+    const isHashedAsset = staticRelativePath.startsWith("assets/");
     return HttpServerResponse.uint8Array(data, {
       status: 200,
       contentType,
+      headers: isHashedAsset
+        ? { "cache-control": "public, max-age=31536000, immutable" }
+        : { "cache-control": "no-cache" },
     });
   }),
 );
