@@ -657,7 +657,12 @@ export function deriveMessagesTimelineRows(input: {
   latestTurn?: TimelineLatestTurn | null;
   runningTurnId?: TurnId | null;
   expandedTurnIds?: ReadonlySet<TurnId>;
+  // Fork semantics: groups render EXPANDED by default; the set holds groups
+  // the user explicitly collapsed (toggled away from the default).
   expandedWorkGroupIds?: ReadonlySet<string>;
+  /** Fork default true: tool groups render expanded; the id set then holds
+   *  user-collapsed groups. Pass false for upstream collapse-first behavior. */
+  workGroupsExpandedByDefault?: boolean;
   isWorking: boolean;
   activeTurnStartedAt: string | null;
   turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
@@ -762,7 +767,11 @@ export function deriveMessagesTimelineRows(input: {
             entry: latestActiveToolEntry.entry,
             groupedEntries: visibleActiveToolEntries.map((entry) => entry.entry),
             groupId,
-            expanded: input.expandedWorkGroupIds?.has(groupId) ?? false,
+            expanded: isWorkGroupExpanded(
+              input.expandedWorkGroupIds,
+              groupId,
+              input.workGroupsExpandedByDefault ?? true,
+            ),
           };
         })()
       : null;
@@ -857,7 +866,11 @@ export function deriveMessagesTimelineRows(input: {
         const activeInProgressToolEntries = visibleGroupedEntries.filter(workEntryIsInActiveRun);
         if (onlyToolEntries && activeInProgressToolEntries.length > 0) {
           const groupId = workGroupId(timelineEntry.id, timelineEntry.entry);
-          const expanded = input.expandedWorkGroupIds?.has(groupId) ?? false;
+          const expanded = isWorkGroupExpanded(
+            input.expandedWorkGroupIds,
+            groupId,
+            input.workGroupsExpandedByDefault ?? true,
+          );
           const latestActiveToolEntry = activeInProgressToolEntries.at(-1)!;
           nextRows.push({
             kind: "work-live",
@@ -882,7 +895,11 @@ export function deriveMessagesTimelineRows(input: {
           }
         } else if (onlyToolEntries) {
           const groupId = workGroupId(timelineEntry.id, timelineEntry.entry);
-          const expanded = input.expandedWorkGroupIds?.has(groupId) ?? false;
+          const expanded = isWorkGroupExpanded(
+            input.expandedWorkGroupIds,
+            groupId,
+            input.workGroupsExpandedByDefault ?? true,
+          );
           const summaryKind = toolGroupSummaryKind(visibleGroupedEntries);
           nextRows.push({
             kind: "work-toggle",
@@ -921,7 +938,11 @@ export function deriveMessagesTimelineRows(input: {
           });
         } else {
           const groupId = workGroupId(timelineEntry.id, timelineEntry.entry);
-          const expanded = input.expandedWorkGroupIds?.has(groupId) ?? false;
+          const expanded = isWorkGroupExpanded(
+            input.expandedWorkGroupIds,
+            groupId,
+            input.workGroupsExpandedByDefault ?? true,
+          );
           // Agent-spawn CTA rows are always visible: a running fleet must
           // never hide behind a "+N tool calls" toggle. Selection is by
           // membership (spawn OR recent-tail), preserving the group's
@@ -1032,6 +1053,15 @@ export function deriveMessagesTimelineRows(input: {
   }
 
   return nextRows;
+}
+
+function isWorkGroupExpanded(
+  toggledIds: ReadonlySet<string> | undefined,
+  groupId: string,
+  expandedByDefault: boolean,
+): boolean {
+  const toggled = toggledIds?.has(groupId) ?? false;
+  return expandedByDefault ? !toggled : toggled;
 }
 
 export function computeStableMessagesTimelineRows(

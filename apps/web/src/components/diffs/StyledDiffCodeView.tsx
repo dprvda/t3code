@@ -5,9 +5,10 @@ import {
   type CodeViewProps,
   type ControlledCodeViewProps,
   type UncontrolledCodeViewProps,
+  FileDiff,
 } from "@pierre/diffs/react";
 /* oxlint-enable eslint/no-restricted-imports */
-import type { Ref } from "react";
+import type { ComponentProps, Ref } from "react";
 
 import { DIFF_SURFACE_THEME_UNSAFE_CSS } from "~/lib/diffRendering";
 
@@ -316,6 +317,32 @@ export function StyledDiffCodeView<LAnnotation = undefined>({
           paddingBottom: 8,
         },
         layout: { paddingTop: 0, paddingBottom: 0, gap: 0 },
+      }}
+    />
+  );
+}
+
+type StyledFileDiffProps = Omit<ComponentProps<typeof FileDiff>, "options"> & {
+  readonly options?: ComponentProps<typeof FileDiff>["options"];
+};
+
+/**
+ * Single-file sibling of StyledDiffCodeView: the same app-styled diff
+ * surface for inline transcript diffs and other embedded single-file
+ * renders, so every diff in the product shares one look.
+ */
+export function StyledFileDiff({ options, className, ...props }: StyledFileDiffProps) {
+  return (
+    <FileDiff
+      {...props}
+      className={
+        className
+          ? `diff-render-surface [--code-background:var(--background)] outline-none ${className}`
+          : "diff-render-surface [--code-background:var(--background)] outline-none"
+      }
+      options={{
+        ...options,
+        unsafeCSS: DIFF_VIEW_UNSAFE_CSS,
       }}
     />
   );

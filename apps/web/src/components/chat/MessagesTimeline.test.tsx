@@ -905,7 +905,10 @@ describe("MessagesTimeline", () => {
     );
 
     expect(markup).toContain("Running pnpm");
-    expect(markup).not.toContain("tool call failed");
+    // Fork: groups render expanded, so the failed sibling row is visible —
+    // the failure must sit on ITS row, never on the live row.
+    expect(markup).toContain("pnpm lint, tool call failed");
+    expect(markup).not.toContain("Running pnpm, tool call failed");
   });
 
   it("keeps terminal command copy live while the parent turn is active", () => {

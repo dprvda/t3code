@@ -30,7 +30,7 @@ import {
   type ReactNode,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import { FileDiff } from "@pierre/diffs/react";
+import { StyledFileDiff } from "../diffs/StyledDiffCodeView";
 import {
   deriveTimelineEntries,
   workEntryDisplayIndicatesToolFailure,
@@ -2058,7 +2058,7 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
       )}
       {renderablePatch?.kind === "files" &&
         renderablePatch.files.map((fileDiff) => (
-          <FileDiff
+          <StyledFileDiff
             key={resolveFileDiffPath(fileDiff)}
             fileDiff={fileDiff}
             options={{
@@ -2633,7 +2633,7 @@ const InlineFileEditDiff = memo(function InlineFileEditDiff(props: {
     <div className="mt-1 ms-7 max-h-72 cursor-default overflow-auto rounded-md border border-border/45">
       {renderablePatch.kind === "files" ? (
         renderablePatch.files.map((fileDiff) => (
-          <FileDiff
+          <StyledFileDiff
             key={resolveFileDiffPath(fileDiff)}
             fileDiff={fileDiff}
             options={{
@@ -2663,6 +2663,8 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   const entryIconName =
     showWarningIndicator || showFailedIndicator ? "x" : workEntryIconName(workEntry);
   const displayText = workEntryPreview(workEntry, workspaceRoot) ?? toolWorkEntryHeading(workEntry);
+  const isCommandRow =
+    workEntry.itemType === "command_execution" || Boolean(workEntry.command?.trim());
   const expandedBody = buildToolCallExpandedBody(workEntry, workspaceRoot);
   const canExpand = expandedBody !== null;
   const showDestructiveRowStyle =
@@ -2685,7 +2687,8 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
       : workLogEntryIsToolLike(workEntry)
         ? "text-secondary-label"
         : "text-foreground/80";
-  const showEntryIcon = !isExpandedToolGroupEntry || showWarningIndicator || showFailedIndicator;
+  // Fork: expanded group rows keep their tool icon (terminal, pencil, ...).
+  const showEntryIcon = true;
   const accessibleDisplayText = showFailedIndicator
     ? `${displayText}, tool call failed`
     : displayText;
@@ -2730,7 +2733,15 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <div className="min-w-0 flex-1 overflow-hidden">
             <p className="flex min-w-0 w-full items-baseline gap-1.5 text-sm leading-relaxed">
-              <span className={cn("min-w-0 flex-1 truncate", headingClass)}>{displayText}</span>
+              <span
+                className={cn(
+                  "min-w-0 flex-1 truncate",
+                  headingClass,
+                  isCommandRow && "font-mono text-[length:var(--font-size-code,0.8125rem)]",
+                )}
+              >
+                {displayText}
+              </span>
             </p>
           </div>
           <span

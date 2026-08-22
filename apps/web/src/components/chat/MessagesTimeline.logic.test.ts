@@ -275,6 +275,7 @@ describe("resolveAssistantMessageCopyState", () => {
 describe("deriveMessagesTimelineRows", () => {
   it("only enables assistant copy for the terminal assistant message in a turn", () => {
     const rows = deriveMessagesTimelineRows({
+      workGroupsExpandedByDefault: false,
       timelineEntries: [
         {
           id: "user-1-entry",
@@ -338,6 +339,7 @@ describe("deriveMessagesTimelineRows", () => {
 
   it("marks only the active assistant turn as streaming for copy controls", () => {
     const rows = deriveMessagesTimelineRows({
+      workGroupsExpandedByDefault: false,
       timelineEntries: [
         {
           id: "assistant-one-entry",
@@ -401,6 +403,7 @@ describe("deriveMessagesTimelineRows", () => {
     };
 
     const rows = deriveMessagesTimelineRows({
+      workGroupsExpandedByDefault: false,
       timelineEntries: [
         {
           id: "user-entry",
@@ -511,6 +514,7 @@ describe("deriveMessagesTimelineRows", () => {
     ];
 
     const collapsedRows = deriveMessagesTimelineRows({
+      workGroupsExpandedByDefault: false,
       timelineEntries,
       isWorking: false,
       activeTurnStartedAt: null,
@@ -533,6 +537,7 @@ describe("deriveMessagesTimelineRows", () => {
     ]);
 
     const expandedRows = deriveMessagesTimelineRows({
+      workGroupsExpandedByDefault: false,
       timelineEntries,
       expandedTurnIds: new Set(["turn-1" as never]),
       isWorking: false,
@@ -559,6 +564,7 @@ describe("deriveMessagesTimelineRows", () => {
     // fold duration must span from the user message that started the turn to
     // the last entry, not message createdAt → message updatedAt (~0ms).
     const rows = deriveMessagesTimelineRows({
+      workGroupsExpandedByDefault: false,
       timelineEntries: [
         {
           id: "user-entry",
@@ -652,6 +658,7 @@ describe("deriveMessagesTimelineRows", () => {
 
   it("uses latest-turn timings and the stopped label for an interrupted latest turn", () => {
     const rows = deriveMessagesTimelineRows({
+      workGroupsExpandedByDefault: false,
       timelineEntries: [
         {
           id: "work-entry-1",
@@ -692,6 +699,7 @@ describe("deriveMessagesTimelineRows", () => {
     // Right after send, isWorking is true but latestTurn still points at the
     // previous, settled turn — it must stay folded through that window.
     const rows = deriveMessagesTimelineRows({
+      workGroupsExpandedByDefault: false,
       timelineEntries: [
         {
           id: "work-entry-1",
@@ -758,6 +766,7 @@ describe("deriveMessagesTimelineRows", () => {
 
   it("does not fold the active in-progress turn", () => {
     const rows = deriveMessagesTimelineRows({
+      workGroupsExpandedByDefault: false,
       timelineEntries: [
         {
           id: "assistant-thought-entry",
@@ -808,6 +817,7 @@ describe("deriveMessagesTimelineRows", () => {
 
   it("keeps adjacent active tool calls in one replacing row", () => {
     const rows = deriveMessagesTimelineRows({
+      workGroupsExpandedByDefault: false,
       timelineEntries: [
         {
           id: "completed-command-entry",
@@ -880,6 +890,7 @@ describe("deriveMessagesTimelineRows", () => {
 
   it("summarizes a tool run after commentary starts a new run", () => {
     const rows = deriveMessagesTimelineRows({
+      workGroupsExpandedByDefault: false,
       timelineEntries: [
         {
           id: "completed-command-entry",
@@ -947,6 +958,7 @@ describe("deriveMessagesTimelineRows", () => {
 
   it("keeps separated in-progress tool runs visible", () => {
     const rows = deriveMessagesTimelineRows({
+      workGroupsExpandedByDefault: false,
       timelineEntries: [
         {
           id: "first-running-entry",
@@ -1014,6 +1026,7 @@ describe("deriveMessagesTimelineRows", () => {
 
   it("does not revive stale in-progress tools before a fresh send has a turn id", () => {
     const rows = deriveMessagesTimelineRows({
+      workGroupsExpandedByDefault: false,
       timelineEntries: [
         {
           id: "stale-running-entry",
@@ -1057,6 +1070,7 @@ describe("deriveMessagesTimelineRows", () => {
 
   it("does not revive separated historical task progress", () => {
     const rows = deriveMessagesTimelineRows({
+      workGroupsExpandedByDefault: false,
       timelineEntries: [
         {
           id: "stale-progress-entry",
@@ -1120,6 +1134,7 @@ describe("deriveMessagesTimelineRows", () => {
 
   it("keeps the latest completed tool call live while the turn is running", () => {
     const rows = deriveMessagesTimelineRows({
+      workGroupsExpandedByDefault: false,
       timelineEntries: [
         {
           id: "latest-command-entry",
@@ -1158,6 +1173,7 @@ describe("deriveMessagesTimelineRows", () => {
 
   it("does not fold the session's running turn when latestTurn regresses", () => {
     const rows = deriveMessagesTimelineRows({
+      workGroupsExpandedByDefault: false,
       timelineEntries: [
         {
           id: "previous-work-entry",
@@ -1219,6 +1235,7 @@ describe("deriveMessagesTimelineRows", () => {
 
   it("only shows assistant metadata on the terminal assistant message", () => {
     const rows = deriveMessagesTimelineRows({
+      workGroupsExpandedByDefault: false,
       timelineEntries: [
         {
           id: "assistant-thought-entry",
@@ -1266,6 +1283,7 @@ describe("deriveMessagesTimelineRows", () => {
 
   it("withholds assistant metadata while the active turn is still in progress", () => {
     const rows = deriveMessagesTimelineRows({
+      workGroupsExpandedByDefault: false,
       timelineEntries: [
         {
           id: "assistant-thought-entry",
@@ -1350,8 +1368,12 @@ describe("deriveMessagesTimelineRows", () => {
       turnDiffSummaryByAssistantMessageId: new Map(),
       revertTurnCountByUserMessageId: new Map(),
     };
-    const collapsedRows = deriveMessagesTimelineRows(baseInput);
+    const collapsedRows = deriveMessagesTimelineRows({
+      workGroupsExpandedByDefault: false,
+      ...baseInput,
+    });
     const expandedRows = deriveMessagesTimelineRows({
+      workGroupsExpandedByDefault: false,
       ...baseInput,
       expandedWorkGroupIds: new Set(["work-group:work-entry-1"]),
     });
@@ -1373,6 +1395,37 @@ describe("deriveMessagesTimelineRows", () => {
     expect(expandedRows.find((row) => row.kind === "work-toggle")).toMatchObject({
       expanded: true,
     });
+  });
+
+  it("fork default: tool groups render expanded, the id set collapses", () => {
+    const timelineEntries = [
+      {
+        id: "work-entry-1",
+        kind: "work" as const,
+        createdAt: "2026-01-01T00:00:01Z",
+        entry: {
+          id: "work-1",
+          createdAt: "2026-01-01T00:00:01Z",
+          label: "read",
+          detail: "Reading package.json",
+          tone: "tool" as const,
+        },
+      },
+    ];
+    const baseInput = {
+      timelineEntries,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    };
+    const defaultRows = deriveMessagesTimelineRows(baseInput);
+    expect(defaultRows.map((row) => row.id)).toEqual(["work-toggle:work-entry-1", "work-1"]);
+    const collapsedRows = deriveMessagesTimelineRows({
+      ...baseInput,
+      expandedWorkGroupIds: new Set(["work-group:work-entry-1"]),
+    });
+    expect(collapsedRows.map((row) => row.id)).toEqual(["work-toggle:work-entry-1"]);
   });
 });
 
@@ -1398,6 +1451,7 @@ describe("computeStableMessagesTimelineRows", () => {
     };
 
     const rows = deriveMessagesTimelineRows({
+      workGroupsExpandedByDefault: false,
       timelineEntries: [
         {
           id: "entry-user-1",
@@ -1447,6 +1501,7 @@ describe("computeStableMessagesTimelineRows", () => {
 
     const createRows = () =>
       deriveMessagesTimelineRows({
+        workGroupsExpandedByDefault: false,
         timelineEntries: [
           {
             id: "entry-work-1",
@@ -1503,6 +1558,7 @@ describe("computeStableMessagesTimelineRows", () => {
     };
 
     const firstRows = deriveMessagesTimelineRows({
+      workGroupsExpandedByDefault: false,
       timelineEntries: [
         {
           id: "entry-user-1",
