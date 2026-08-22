@@ -71,6 +71,7 @@ import { Button } from "../ui/button";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesCard } from "./ChangedFilesTree";
+import { DiffStatLabel } from "./DiffStatLabel";
 import { shouldAutoExpandChangedFiles } from "./changedFilesPresentation";
 import { MessageCopyButton } from "./MessageCopyButton";
 import {
@@ -1532,36 +1533,107 @@ function toolGroupSummaryIconName(
   }
 }
 
+/**
+ * Stats for a tool group header, in the vocabulary of the finished-turn
+ * changed-files card: distinct edited files with +/- line counts (from the
+ * structured edit payloads), plus read and command counts.
+ */
+function summarizeWorkGroupStats(entries: ReadonlyArray<TimelineWorkEntry>): {
+  editedFiles: number;
+  additions: number;
+  deletions: number;
+  reads: number;
+  commands: number;
+} {
+  const edited = new Set<string>();
+  let additions = 0;
+  let deletions = 0;
+  let reads = 0;
+  let commands = 0;
+  for (const entry of entries) {
+    const action = toolGroupAction(entry);
+    if (entry.fileEdit) {
+      edited.add(entry.fileEdit.path);
+      additions += entry.fileEdit.newText === "" ? 0 : entry.fileEdit.newText.split("\n").length;
+      deletions += entry.fileEdit.oldText === "" ? 0 : entry.fileEdit.oldText.split("\n").length;
+    } else if (action === "edit") {
+      for (const path of entry.changedFiles ?? []) edited.add(path);
+    } else if (action === "read" || action === "code-search" || action === "search") {
+      reads += 1;
+    } else if (action === "command") {
+      commands += 1;
+    }
+  }
+  return { editedFiles: edited.size, additions, deletions, reads, commands };
+}
+
 function WorkGroupToggleTimelineRow({
   row,
 }: {
   row: Extract<TimelineRow, { kind: "work-toggle" }>;
 }) {
   const ctx = use(TimelineRowCtx);
+  const stats = useMemo(() => summarizeWorkGroupStats(row.groupedEntries), [row.groupedEntries]);
   if (row.onlyToolEntries && row.summary) {
+    const parts: string[] = [];
+    if (stats.editedFiles > 0) {
+      parts.push(`${stats.editedFiles} changed file${stats.editedFiles === 1 ? "" : "s"}`);
+    }
+    if (stats.reads > 0) parts.push(`${stats.reads} read`);
+    if (stats.commands > 0) {
+      parts.push(`${stats.commands} command${stats.commands === 1 ? "" : "s"}`);
+    }
+    const headline = parts.length > 0 ? parts.join(" · ") : row.summary;
     return (
-      <button
-        type="button"
-        className="group/tool-group flex min-h-6 w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-sm leading-relaxed transition-colors duration-150 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-        aria-label={row.hasFailure ? `${row.summary}, tool call failed` : undefined}
-        aria-expanded={row.expanded}
-        onClick={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
+      <div
+        className="mt-1 rounded-2xl border border-border/70 bg-secondary p-1 dark:border-transparent dark:bg-input/32"
+        data-work-group-state={row.expanded ? "expanded" : "collapsed"}
       >
-        <span
-          className={cn(
-            "flex size-6 shrink-0 items-center justify-center",
-            row.hasFailure ? "text-destructive" : "text-icon-muted",
-          )}
-          role={row.hasFailure ? "img" : undefined}
-          aria-label={row.hasFailure ? "Tool call failed" : undefined}
+        <button
+          type="button"
+          className="group/tool-group flex w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={row.hasFailure ? `${headline}, tool call failed` : undefined}
+          aria-expanded={row.expanded}
+          onClick={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
         >
-          <WorkEntryIconSvg
-            name={row.hasFailure ? "x" : toolGroupSummaryIconName(row.summaryKind)}
-            className="size-4 shrink-0 stroke-[1.8] opacity-70"
+          <ChevronRightIcon
+            aria-hidden="true"
+            className={cn(
+              "size-3.5 shrink-0 text-muted-foreground transition-transform",
+              row.expanded && "rotate-90",
+            )}
           />
-        </span>
-        <span className="min-w-0 flex-1 truncate text-secondary-label">{row.summary}</span>
-      </button>
+          <span
+            className={cn(
+              "flex size-5 shrink-0 items-center justify-center",
+              row.hasFailure ? "text-destructive" : "text-icon-muted",
+            )}
+            role={row.hasFailure ? "img" : undefined}
+            aria-label={row.hasFailure ? "Tool call failed" : undefined}
+          >
+            <WorkEntryIconSvg
+              name={row.hasFailure ? "x" : toolGroupSummaryIconName(row.summaryKind)}
+              className="size-3.5 shrink-0 stroke-[1.8] opacity-70"
+            />
+          </span>
+          <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+            <span className="shrink-0 whitespace-nowrap font-medium text-foreground text-xs leading-4">
+              {headline}
+            </span>
+            {stats.additions > 0 || stats.deletions > 0 ? (
+              <DiffStatLabel
+                additions={stats.additions}
+                deletions={stats.deletions}
+                className="text-xs leading-4"
+                layout="inline"
+              />
+            ) : null}
+            <span className="ml-1 hidden min-w-0 flex-1 truncate text-[11px] text-muted-foreground group-hover/tool-group:text-foreground/80 sm:inline">
+              {row.expanded ? "Hide details" : "Show details"}
+            </span>
+          </span>
+        </button>
+      </div>
     );
   }
   const labelNoun = row.onlyToolEntries
@@ -2750,7 +2822,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   const isCommandRow =
     workEntry.itemType === "command_execution" || Boolean(workEntry.command?.trim());
   const expandedBody = buildToolCallExpandedBody(workEntry, workspaceRoot);
-  const canExpand = expandedBody !== null;
+  const canExpand = expandedBody !== null || workEntry.fileEdit !== undefined;
   const showDestructiveRowStyle =
     showFailedIndicator &&
     (workEntry.sourceActivityKind === "runtime.error" || !workLogEntryIsToolLike(workEntry));
@@ -2844,12 +2916,12 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
           </span>
         </div>
       </div>
-      {workEntry.fileEdit ? (
+      {expanded && workEntry.fileEdit ? (
         <div onClick={stopRowToggle} onPointerDown={stopRowToggle}>
           <InlineFileEditDiff fileEdit={workEntry.fileEdit} />
         </div>
       ) : null}
-      {expanded && canExpand && expandedBody ? (
+      {expanded && canExpand && expandedBody && !workEntry.fileEdit ? (
         <div
           className="mt-1 ms-7 cursor-default border-s border-border/45 ps-3 pt-0.5"
           onClick={stopRowToggle}

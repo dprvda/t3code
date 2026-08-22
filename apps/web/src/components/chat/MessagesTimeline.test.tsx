@@ -809,7 +809,7 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("Changed 1 file");
+    expect(markup).toContain("1 changed file");
     expect(markup).not.toContain("C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts");
   });
 
@@ -905,10 +905,7 @@ describe("MessagesTimeline", () => {
     );
 
     expect(markup).toContain("Running pnpm");
-    // Fork: groups render expanded, so the failed sibling row is visible —
-    // the failure must sit on ITS row, never on the live row.
-    expect(markup).toContain("pnpm lint, tool call failed");
-    expect(markup).not.toContain("Running pnpm, tool call failed");
+    expect(markup).not.toContain("tool call failed");
   });
 
   it("keeps terminal command copy live while the parent turn is active", () => {

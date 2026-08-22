@@ -1397,7 +1397,7 @@ describe("deriveMessagesTimelineRows", () => {
     });
   });
 
-  it("fork default: tool groups render expanded, the id set collapses", () => {
+  it("workGroupsExpandedByDefault inverts the id set semantics", () => {
     const timelineEntries = [
       {
         id: "work-entry-1",
@@ -1420,12 +1420,18 @@ describe("deriveMessagesTimelineRows", () => {
       revertTurnCountByUserMessageId: new Map(),
     };
     const defaultRows = deriveMessagesTimelineRows(baseInput);
-    expect(defaultRows.map((row) => row.id)).toEqual(["work-toggle:work-entry-1", "work-1"]);
-    const collapsedRows = deriveMessagesTimelineRows({
+    expect(defaultRows.map((row) => row.id)).toEqual(["work-toggle:work-entry-1"]);
+    const invertedRows = deriveMessagesTimelineRows({
       ...baseInput,
+      workGroupsExpandedByDefault: true,
+    });
+    expect(invertedRows.map((row) => row.id)).toEqual(["work-toggle:work-entry-1", "work-1"]);
+    const invertedCollapsed = deriveMessagesTimelineRows({
+      ...baseInput,
+      workGroupsExpandedByDefault: true,
       expandedWorkGroupIds: new Set(["work-group:work-entry-1"]),
     });
-    expect(collapsedRows.map((row) => row.id)).toEqual(["work-toggle:work-entry-1"]);
+    expect(invertedCollapsed.map((row) => row.id)).toEqual(["work-toggle:work-entry-1"]);
   });
 });
 

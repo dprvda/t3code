@@ -206,6 +206,8 @@ export type MessagesTimelineRow =
       summary: string | null;
       summaryKind: ToolGroupSummaryKind | null;
       hasFailure: boolean;
+      /** The entries the toggle stands for, so the header can show stats. */
+      groupedEntries: WorkLogEntry[];
     }
   | {
       kind: "turn-fold";
@@ -657,11 +659,8 @@ export function deriveMessagesTimelineRows(input: {
   latestTurn?: TimelineLatestTurn | null;
   runningTurnId?: TurnId | null;
   expandedTurnIds?: ReadonlySet<TurnId>;
-  // Fork semantics: groups render EXPANDED by default; the set holds groups
-  // the user explicitly collapsed (toggled away from the default).
   expandedWorkGroupIds?: ReadonlySet<string>;
-  /** Fork default true: tool groups render expanded; the id set then holds
-   *  user-collapsed groups. Pass false for upstream collapse-first behavior. */
+  /** When true the id set holds user-collapsed groups instead; default false. */
   workGroupsExpandedByDefault?: boolean;
   isWorking: boolean;
   activeTurnStartedAt: string | null;
@@ -770,7 +769,7 @@ export function deriveMessagesTimelineRows(input: {
             expanded: isWorkGroupExpanded(
               input.expandedWorkGroupIds,
               groupId,
-              input.workGroupsExpandedByDefault ?? true,
+              input.workGroupsExpandedByDefault ?? false,
             ),
           };
         })()
@@ -869,7 +868,7 @@ export function deriveMessagesTimelineRows(input: {
           const expanded = isWorkGroupExpanded(
             input.expandedWorkGroupIds,
             groupId,
-            input.workGroupsExpandedByDefault ?? true,
+            input.workGroupsExpandedByDefault ?? false,
           );
           const latestActiveToolEntry = activeInProgressToolEntries.at(-1)!;
           nextRows.push({
@@ -898,7 +897,7 @@ export function deriveMessagesTimelineRows(input: {
           const expanded = isWorkGroupExpanded(
             input.expandedWorkGroupIds,
             groupId,
-            input.workGroupsExpandedByDefault ?? true,
+            input.workGroupsExpandedByDefault ?? false,
           );
           const summaryKind = toolGroupSummaryKind(visibleGroupedEntries);
           nextRows.push({
@@ -914,6 +913,7 @@ export function deriveMessagesTimelineRows(input: {
             hasFailure: visibleGroupedEntries.some((entry) =>
               workEntryDisplayIndicatesToolFailure(entry),
             ),
+            groupedEntries: visibleGroupedEntries,
           });
           if (expanded) {
             for (const [entryIndex, workEntry] of visibleGroupedEntries.entries()) {
@@ -941,7 +941,7 @@ export function deriveMessagesTimelineRows(input: {
           const expanded = isWorkGroupExpanded(
             input.expandedWorkGroupIds,
             groupId,
-            input.workGroupsExpandedByDefault ?? true,
+            input.workGroupsExpandedByDefault ?? false,
           );
           // Agent-spawn CTA rows are always visible: a running fleet must
           // never hide behind a "+N tool calls" toggle. Selection is by
@@ -984,6 +984,7 @@ export function deriveMessagesTimelineRows(input: {
               hasFailure: hiddenEntries.some((entry) =>
                 workEntryDisplayIndicatesToolFailure(entry),
               ),
+              groupedEntries: hiddenEntries,
             });
           }
         }
@@ -1138,6 +1139,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.expanded === bw.expanded &&
         a.onlyToolEntries === bw.onlyToolEntries &&
         a.summary === bw.summary &&
+        Equal.equals(a.groupedEntries, bw.groupedEntries) &&
         a.summaryKind === bw.summaryKind &&
         a.hasFailure === bw.hasFailure
       );

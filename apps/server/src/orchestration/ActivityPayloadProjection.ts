@@ -53,8 +53,6 @@ function collectChangedFiles(
 
   pushChangedFile(target, seen, record.path);
   pushChangedFile(target, seen, record.filePath);
-  pushChangedFile(target, seen, record.file_path);
-  pushChangedFile(target, seen, record.notebook_path);
   pushChangedFile(target, seen, record.relativePath);
   pushChangedFile(target, seen, record.filename);
   pushChangedFile(target, seen, record.newPath);
@@ -421,6 +419,11 @@ export function projectActivityPayload(
     const fileEditInput = projectFileEditInput(data);
     if (fileEditInput) {
       projectedData.input = fileEditInput;
+      // Claude's Edit/Write carry the path as snake_case `file_path`; surface
+      // it as a changed file only here so Read/Glob inputs never count as edits.
+      if (projectedData.files === undefined) {
+        projectedData.files = [{ path: fileEditInput.file_path }];
+      }
     }
   }
 

@@ -262,6 +262,19 @@ describe("file-change input projection", () => {
     expect((input.content as string).length).toBe(20_000);
   });
 
+  it("does not report Read inputs as changed files", () => {
+    const projected = projectActivityPayload({
+      ...baseActivity,
+      payload: {
+        itemType: "dynamic_tool_call",
+        data: { toolName: "Read", input: { file_path: "/repo/a.md" } },
+      },
+    } as never);
+    const data = (projected.payload as Record<string, unknown>).data as Record<string, unknown>;
+    expect(data.files).toBeUndefined();
+    expect(data.input).toBeUndefined();
+  });
+
   it("drops non-edit file_change inputs entirely", () => {
     const projected = projectActivityPayload({
       ...baseActivity,

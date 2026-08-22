@@ -2650,7 +2650,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         itemId,
         itemType,
         toolName,
-        title: titleForTool(itemType),
+        // "Read File" is the title clients already classify as a read.
+        title: toolName === "Read" ? "Read File" : titleForTool(itemType),
         detail,
         input: toolInput,
         partialInputJson: "",
