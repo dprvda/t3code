@@ -194,7 +194,11 @@ import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrom
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useIsMobile } from "~/hooks/useMediaQuery";
 import { CommandDialogTrigger } from "./ui/command";
-import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
+import {
+  useClientSettings,
+  usePrimarySettings,
+  useUpdateClientSettings,
+} from "~/hooks/useSettings";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import {
   derivePhysicalProjectKey,
@@ -2857,6 +2861,7 @@ interface SidebarProjectsContentProps {
   archiveThread: ReturnType<typeof useThreadActions>["archiveThread"];
   deleteThread: ReturnType<typeof useThreadActions>["deleteThread"];
   sortedProjects: readonly SidebarProjectSnapshot[];
+  groupHeaderByProjectKey: ReadonlyMap<string, { name: string; color?: string }>;
   expandedThreadListsByProject: ReadonlySet<string>;
   activeRouteProjectKey: string | null;
   routeThreadKey: string | null;
@@ -2899,6 +2904,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     archiveThread,
     deleteThread,
     sortedProjects,
+    groupHeaderByProjectKey,
     expandedThreadListsByProject,
     activeRouteProjectKey,
     routeThreadKey,
@@ -3070,28 +3076,46 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
         ) : (
           <SidebarMenu ref={attachProjectListAutoAnimateRef}>
             {sortedProjects.map((project) => (
-              <SidebarProjectListRow
-                key={project.projectKey}
-                project={project}
-                isThreadListExpanded={expandedThreadListsByProject.has(project.projectKey)}
-                activeRouteThreadKey={
-                  activeRouteProjectKey === project.projectKey ? routeThreadKey : null
-                }
-                openPullRequestsInRightPanel={openPullRequestsInRightPanel}
-                newThreadShortcutLabel={newThreadShortcutLabel}
-                handleNewThread={handleNewThread}
-                archiveThread={archiveThread}
-                deleteThread={deleteThread}
-                threadJumpLabelByKey={threadJumpLabelByKey}
-                attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
-                expandThreadListForProject={expandThreadListForProject}
-                collapseThreadListForProject={collapseThreadListForProject}
-                dragInProgressRef={dragInProgressRef}
-                suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
-                suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
-                isManualProjectSorting={isManualProjectSorting}
-                dragHandleProps={null}
-              />
+              <React.Fragment key={project.projectKey}>
+                {(() => {
+                  const header = groupHeaderByProjectKey.get(project.projectKey);
+                  return header ? (
+                    <div className="flex items-center gap-1.5 px-2 pt-3 pb-1 first:pt-1">
+                      {header.color !== undefined ? (
+                        <span
+                          aria-hidden="true"
+                          className="size-1.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: header.color }}
+                        />
+                      ) : null}
+                      <span className="font-medium text-[10px] text-secondary-label uppercase tracking-wider">
+                        {header.name}
+                      </span>
+                    </div>
+                  ) : null;
+                })()}
+                <SidebarProjectListRow
+                  project={project}
+                  isThreadListExpanded={expandedThreadListsByProject.has(project.projectKey)}
+                  activeRouteThreadKey={
+                    activeRouteProjectKey === project.projectKey ? routeThreadKey : null
+                  }
+                  openPullRequestsInRightPanel={openPullRequestsInRightPanel}
+                  newThreadShortcutLabel={newThreadShortcutLabel}
+                  handleNewThread={handleNewThread}
+                  archiveThread={archiveThread}
+                  deleteThread={deleteThread}
+                  threadJumpLabelByKey={threadJumpLabelByKey}
+                  attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
+                  expandThreadListForProject={expandThreadListForProject}
+                  collapseThreadListForProject={collapseThreadListForProject}
+                  dragInProgressRef={dragInProgressRef}
+                  suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
+                  suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
+                  isManualProjectSorting={isManualProjectSorting}
+                  dragHandleProps={null}
+                />
+              </React.Fragment>
             ))}
           </SidebarMenu>
         )}
@@ -3113,6 +3137,7 @@ export default function LegacySidebar() {
   const navigate = useNavigate();
   const sidebarThreadSortOrder = useClientSettings((s) => s.sidebarThreadSortOrder);
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
+  const sidebarProjectGroups = usePrimarySettings((s) => s.sidebarProjectGroups);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const sidebarThreadPreviewCount = useClientSettings((s) => s.sidebarThreadPreviewCount);
   const updateSettings = useUpdateClientSettings();
@@ -3381,7 +3406,7 @@ export default function LegacySidebar() {
     () => sidebarThreads.filter((thread) => thread.archivedAt === null),
     [sidebarThreads],
   );
-  const sortedProjects = useMemo(() => {
+  const activitySortedProjects = useMemo(() => {
     const sortableProjects = sidebarProjects.map((project) => ({
       ...project,
       id: project.projectKey,
@@ -3412,6 +3437,47 @@ export default function LegacySidebar() {
     sidebarProjects,
     visibleThreads,
   ]);
+  // Named project groups (ADE's Products/Flagships/Hub/Vault port): reorder
+  // the flat list into configured-group order (inner sort preserved) and mark
+  // each group's first project with its header. Manual sorting stays flat —
+  // drag-and-drop and group headers don't compose.
+  const { sortedProjects, groupHeaderByProjectKey } = useMemo(() => {
+    if (sidebarProjectSortOrder === "manual" || sidebarProjectGroups.length === 0) {
+      return {
+        sortedProjects: activitySortedProjects,
+        groupHeaderByProjectKey: new Map<string, { name: string; color?: string }>(),
+      };
+    }
+    const groupIndexOf = (project: SidebarProjectSnapshot): number =>
+      sidebarProjectGroups.findIndex(
+        (group) =>
+          group.projects.includes(project.title) || group.projects.includes(project.displayName),
+      );
+    const sections: SidebarProjectSnapshot[][] = sidebarProjectGroups.map(() => []);
+    const ungrouped: SidebarProjectSnapshot[] = [];
+    for (const project of activitySortedProjects) {
+      const index = groupIndexOf(project);
+      (index === -1 ? ungrouped : sections[index])?.push(project);
+    }
+    const flat: SidebarProjectSnapshot[] = [];
+    const headers = new Map<string, { name: string; color?: string }>();
+    sidebarProjectGroups.forEach((group, index) => {
+      const members = sections[index] ?? [];
+      const first = members[0];
+      if (first === undefined) return;
+      headers.set(first.projectKey, {
+        name: group.name,
+        ...(group.color !== undefined ? { color: group.color } : {}),
+      });
+      flat.push(...members);
+    });
+    const firstUngrouped = ungrouped[0];
+    if (firstUngrouped !== undefined && flat.length > 0) {
+      headers.set(firstUngrouped.projectKey, { name: "Other" });
+    }
+    flat.push(...ungrouped);
+    return { sortedProjects: flat, groupHeaderByProjectKey: headers };
+  }, [activitySortedProjects, sidebarProjectGroups, sidebarProjectSortOrder]);
   const isManualProjectSorting = sidebarProjectSortOrder === "manual";
   const visibleSidebarThreadKeys = useMemo(
     () =>
@@ -3761,6 +3827,7 @@ export default function LegacySidebar() {
         archiveThread={archiveThread}
         deleteThread={deleteThread}
         sortedProjects={sortedProjects}
+        groupHeaderByProjectKey={groupHeaderByProjectKey}
         expandedThreadListsByProject={expandedThreadListsByProject}
         activeRouteProjectKey={activeRouteProjectKey}
         routeThreadKey={routeThreadKey}

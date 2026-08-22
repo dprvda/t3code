@@ -30,6 +30,18 @@ export const TimestampFormat = Schema.Literals(["locale", "12-hour", "24-hour"])
 export type TimestampFormat = typeof TimestampFormat.Type;
 export const DEFAULT_TIMESTAMP_FORMAT: TimestampFormat = "locale";
 
+/**
+ * A named sidebar project group (ADE's Products/Flagships/Hub/Vault port):
+ * projects are matched by title, listed in the group's configured order.
+ * Projects matching no group render under a trailing ungrouped section.
+ */
+export const SidebarProjectGroup = Schema.Struct({
+  name: Schema.String,
+  color: Schema.optionalKey(Schema.String),
+  projects: Schema.Array(Schema.String),
+});
+export type SidebarProjectGroup = typeof SidebarProjectGroup.Type;
+
 export const SidebarProjectSortOrder = Schema.Literals([
   "updated_at",
   "created_at",
@@ -698,6 +710,10 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   contextRecycle: ContextRecycleSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  /** Named sidebar project groups; empty = no grouping (flat list). */
+  sidebarProjectGroups: Schema.Array(SidebarProjectGroup).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   sourceControlWriterModelSelection: Schema.NullOr(ModelSelection).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
@@ -898,6 +914,7 @@ export const ServerSettingsPatch = Schema.Struct({
       maxTurns: Schema.optionalKey(Schema.Int),
     }),
   ),
+  sidebarProjectGroups: Schema.optionalKey(Schema.Array(SidebarProjectGroup)),
   observability: Schema.optionalKey(
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(TrimmedString),
