@@ -17,7 +17,7 @@ import { Checkbox } from "../ui/checkbox";
 import { SettingsPageContainer, SettingsSection, useRelativeTimeTick } from "./settingsLayout";
 
 // "pattiterrainmiser@gmail.com" -> "p**r"; full email lives in the title attr
-function maskEmail(email: string): string {
+export function maskEmail(email: string): string {
   const local = email.split("@")[0] ?? "";
   return local.length < 2 ? local : `${local[0]}**${local[local.length - 1]}`;
 }
