@@ -1538,6 +1538,17 @@ function toolGroupSummaryIconName(
  * changed-files card: distinct edited files with +/- line counts (from the
  * structured edit payloads), plus read and command counts.
  */
+/** Line counts of a structured edit: old lines removed, new lines added. */
+function fileEditLineStats(fileEdit: NonNullable<TimelineWorkEntry["fileEdit"]>): {
+  additions: number;
+  deletions: number;
+} {
+  return {
+    additions: fileEdit.newText === "" ? 0 : fileEdit.newText.split("\n").length,
+    deletions: fileEdit.oldText === "" ? 0 : fileEdit.oldText.split("\n").length,
+  };
+}
+
 function summarizeWorkGroupStats(entries: ReadonlyArray<TimelineWorkEntry>): {
   editedFiles: number;
   additions: number;
@@ -1554,11 +1565,18 @@ function summarizeWorkGroupStats(entries: ReadonlyArray<TimelineWorkEntry>): {
     const action = toolGroupAction(entry);
     if (entry.fileEdit) {
       edited.add(entry.fileEdit.path);
-      additions += entry.fileEdit.newText === "" ? 0 : entry.fileEdit.newText.split("\n").length;
-      deletions += entry.fileEdit.oldText === "" ? 0 : entry.fileEdit.oldText.split("\n").length;
+      const lineStats = fileEditLineStats(entry.fileEdit);
+      additions += lineStats.additions;
+      deletions += lineStats.deletions;
     } else if (action === "edit") {
       for (const path of entry.changedFiles ?? []) edited.add(path);
-    } else if (action === "read" || action === "code-search" || action === "search") {
+    } else if (
+      action === "read" ||
+      action === "code-search" ||
+      action === "search" ||
+      // Rows recorded before the adapter titled Read calls "Read File".
+      entry.detail?.startsWith("Read: ")
+    ) {
       reads += 1;
     } else if (action === "command") {
       commands += 1;
@@ -1585,27 +1603,17 @@ function WorkGroupToggleTimelineRow({
     }
     const headline = parts.length > 0 ? parts.join(" · ") : row.summary;
     return (
-      <div
-        className="mt-1 rounded-2xl border border-border/70 bg-secondary p-1 dark:border-transparent dark:bg-input/32"
-        data-work-group-state={row.expanded ? "expanded" : "collapsed"}
-      >
+      <div data-work-group-state={row.expanded ? "expanded" : "collapsed"}>
         <button
           type="button"
-          className="group/tool-group flex w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="group/tool-group flex min-h-6 w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-sm leading-relaxed transition-colors duration-150 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
           aria-label={row.hasFailure ? `${headline}, tool call failed` : undefined}
           aria-expanded={row.expanded}
           onClick={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
         >
-          <ChevronRightIcon
-            aria-hidden="true"
-            className={cn(
-              "size-3.5 shrink-0 text-muted-foreground transition-transform",
-              row.expanded && "rotate-90",
-            )}
-          />
           <span
             className={cn(
-              "flex size-5 shrink-0 items-center justify-center",
+              "flex size-6 shrink-0 items-center justify-center",
               row.hasFailure ? "text-destructive" : "text-icon-muted",
             )}
             role={row.hasFailure ? "img" : undefined}
@@ -1613,25 +1621,30 @@ function WorkGroupToggleTimelineRow({
           >
             <WorkEntryIconSvg
               name={row.hasFailure ? "x" : toolGroupSummaryIconName(row.summaryKind)}
-              className="size-3.5 shrink-0 stroke-[1.8] opacity-70"
+              className="size-4 shrink-0 stroke-[1.8] opacity-70"
             />
           </span>
-          <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
-            <span className="shrink-0 whitespace-nowrap font-medium text-foreground text-xs leading-4">
-              {headline}
-            </span>
+          <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+            <span className="min-w-0 truncate text-secondary-label">{headline}</span>
             {stats.additions > 0 || stats.deletions > 0 ? (
               <DiffStatLabel
                 additions={stats.additions}
                 deletions={stats.deletions}
-                className="text-xs leading-4"
+                className="shrink-0 text-[11px] leading-4 opacity-75"
                 layout="inline"
               />
             ) : null}
-            <span className="ml-1 hidden min-w-0 flex-1 truncate text-[11px] text-muted-foreground group-hover/tool-group:text-foreground/80 sm:inline">
+            <span className="hidden shrink-0 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover/tool-group:opacity-100 sm:inline">
               {row.expanded ? "Hide details" : "Show details"}
             </span>
           </span>
+          <ChevronDownIcon
+            aria-hidden="true"
+            className={cn(
+              "size-3 shrink-0 text-icon-muted opacity-70 transition-transform duration-200",
+              row.expanded && "rotate-180",
+            )}
+          />
         </button>
       </div>
     );
@@ -2900,6 +2913,14 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
               </span>
             </p>
           </div>
+          {workEntry.fileEdit ? (
+            <DiffStatLabel
+              additions={fileEditLineStats(workEntry.fileEdit).additions}
+              deletions={fileEditLineStats(workEntry.fileEdit).deletions}
+              className="shrink-0 text-[11px] leading-4"
+              layout="inline"
+            />
+          ) : null}
           <span
             className={cn(
               "flex size-4 shrink-0 items-center justify-center",
