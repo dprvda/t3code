@@ -852,6 +852,9 @@ function sortProjectsByActivity<TProject extends SidebarProject>(
   if (sortOrder === "manual") {
     return [...projects];
   }
+  if (sortOrder === "alphabetical") {
+    return [...projects].toSorted(compareTies);
+  }
 
   return [...projects].toSorted((left, right) => {
     const rightTimestamp = getProjectSortTimestamp(right, getProjectThreads(right), sortOrder);
