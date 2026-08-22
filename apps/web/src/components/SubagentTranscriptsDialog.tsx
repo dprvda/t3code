@@ -7,15 +7,10 @@ import type {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-
+import { PaneComposer } from "./chat/PaneComposer";
 import { SubagentTimelineView } from "./chat/ThreadTimelineView";
 import { subagentViewEnvironment } from "../state/subagentView";
-import { useThreadShell } from "../state/entities";
-import { threadEnvironment } from "../state/threads";
-import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
-import { newMessageId } from "~/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 import { ScrollArea } from "./ui/scroll-area";
 
@@ -51,9 +46,6 @@ export function SubagentTranscriptsDialog({
   const [blocks, setBlocks] = useState<readonly SubagentTranscriptBlock[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const openRunRef = useRef<((run: SubagentRunSummary) => void) | null>(null);
-  const shell = useThreadShell(scopeThreadRef(environmentId, threadId));
-  const startTurn = useAtomCommand(threadEnvironment.startTurn, "steer session from subagent view");
-  const [steer, setSteer] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -104,22 +96,6 @@ export function SubagentTranscriptsDialog({
     [environmentId, threadId, fetchTranscript],
   );
   openRunRef.current = openRun;
-
-  const sendSteer = () => {
-    const text = steer.trim();
-    if (text.length === 0 || shell === null) return;
-    setSteer("");
-    void startTurn({
-      environmentId,
-      input: {
-        threadId,
-        message: { messageId: newMessageId(), role: "user", text, attachments: [] },
-        modelSelection: shell.modelSelection,
-        runtimeMode: shell.runtimeMode,
-        interactionMode: shell.interactionMode,
-      },
-    });
-  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -181,21 +157,11 @@ export function SubagentTranscriptsDialog({
           </div>
         </div>
         {selected !== null ? (
-          <div className="flex shrink-0 items-center gap-2 border-border border-t pt-2">
-            <span className="shrink-0 font-mono text-[11px] text-secondary-label">❯</span>
-            <input
-              value={steer}
-              onChange={(changeEvent) => setSteer(changeEvent.target.value)}
-              onKeyDown={(keyEvent) => {
-                if (keyEvent.key === "Enter" && !keyEvent.shiftKey) {
-                  keyEvent.preventDefault();
-                  sendSteer();
-                }
-              }}
-              placeholder="message this session (steers the running agent, like typing during a Task)…"
-              className="min-w-0 flex-1 bg-transparent font-mono text-xs outline-none placeholder:text-secondary-label/60"
-            />
-          </div>
+          <PaneComposer
+            environmentId={environmentId}
+            threadId={threadId}
+            placeholder="message this session (steers the running agent, like typing during a Task)…"
+          />
         ) : null}
       </DialogContent>
     </Dialog>

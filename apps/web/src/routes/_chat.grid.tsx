@@ -7,6 +7,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { CircleCheckIcon, HandIcon, RecycleIcon, UndoDotIcon } from "lucide-react";
 import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
+import { PaneComposer } from "../components/chat/PaneComposer";
 import { ThreadTimelineView } from "../components/chat/ThreadTimelineView";
 import { resolveThreadStatusPill, type ThreadStatusPill } from "../components/Sidebar.logic";
 import { SidebarInset } from "../components/ui/sidebar";
@@ -15,7 +16,7 @@ import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { useProjects, useThreadDetail, useThreadShells } from "../state/entities";
 import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
-import { cn, newMessageId } from "~/lib/utils";
+import { cn } from "~/lib/utils";
 
 function gcd(a: number, b: number): number {
   return b === 0 ? a : gcd(b, a % b);
@@ -117,30 +118,12 @@ function SessionPane({
   const requestRecycle = useAtomCommand(threadEnvironment.requestRecycle, "thread recycle request");
   const settleThread = useAtomCommand(threadEnvironment.settle, "thread settle");
   const unsettleThread = useAtomCommand(threadEnvironment.unsettle, "thread unsettle");
-  const startTurn = useAtomCommand(threadEnvironment.startTurn, "thread turn start");
   const pill = resolveThreadStatusPill({ thread: shell }) ?? fallbackStatusPill(shell);
   const word = statusWord(shell, pill);
   const pct = contextUsagePct(detail);
   const needsYou =
     shell.hasPendingApprovals || shell.hasPendingUserInput || shell.hasActionableProposedPlan;
   const isSettled = shell.settledAt !== null || shell.settledOverride === "settled";
-  const [draft, setDraft] = useState("");
-
-  const send = () => {
-    const text = draft.trim();
-    if (text.length === 0) return;
-    setDraft("");
-    void startTurn({
-      environmentId: shell.environmentId,
-      input: {
-        threadId: shell.id,
-        message: { messageId: newMessageId(), role: "user", text, attachments: [] },
-        modelSelection: shell.modelSelection,
-        runtimeMode: shell.runtimeMode,
-        interactionMode: shell.interactionMode,
-      },
-    });
-  };
 
   return (
     <div
@@ -231,24 +214,12 @@ function SessionPane({
       <div className="min-h-0 flex-1 overflow-hidden bg-muted/30">
         <ThreadTimelineView environmentId={shell.environmentId} threadId={shell.id} />
       </div>
-      {/* per-pane composer */}
-      <div className="flex shrink-0 items-center gap-1.5 border-border border-t px-2.5 py-1.5">
-        <span aria-hidden="true" className="font-mono text-[11px] text-secondary-label">
-          ❯
-        </span>
-        <input
-          value={draft}
-          onChange={(changeEvent) => setDraft(changeEvent.target.value)}
-          onKeyDown={(keyEvent) => {
-            if (keyEvent.key === "Enter" && !keyEvent.shiftKey) {
-              keyEvent.preventDefault();
-              send();
-            }
-          }}
-          placeholder={`message ${shell.modelSelection.model}…`}
-          className="min-w-0 flex-1 bg-transparent font-mono text-[11px] outline-none placeholder:text-secondary-label/60"
-        />
-      </div>
+      {/* per-pane composer — the solo composer's core controls */}
+      <PaneComposer
+        environmentId={shell.environmentId}
+        threadId={shell.id}
+        placeholder={`message ${shell.modelSelection.model}…`}
+      />
     </div>
   );
 }
