@@ -248,6 +248,14 @@ interface ClaudeTaskAgentState {
    * routed stream carries no message_delta usage.
    */
   observedUsageByMessageId?: Map<string, number> | undefined;
+  /**
+   * Context of the subagent's most recent API call: input + cache-write +
+   * cache-read of the latest forwarded assistant snapshot, plus the
+   * cache-read share of it. Every call resends the whole conversation, so
+   * this one call IS the agent's live context — the cumulative sums count
+   * that same context once per call and cannot answer "how full is it".
+   */
+  latestObservedContext?: ObservedAgentContext | undefined;
 }
 
 interface ClaudeSessionContext {
@@ -1001,6 +1009,31 @@ function claudeMessageTotalTokens(usage: unknown): number | undefined {
   return total > 0 ? total : undefined;
 }
 
+interface ObservedAgentContext {
+  readonly contextTokens: number;
+  readonly contextCachedTokens: number;
+}
+
+/**
+ * Live context of ONE API call — input + cache-write + cache-read — with the
+ * cache-read share. Not a running total: each call resends the conversation,
+ * so the newest call's input side is what currently occupies the window.
+ */
+function claudeMessageContext(usage: unknown): ObservedAgentContext | undefined {
+  if (!usage || typeof usage !== "object") {
+    return undefined;
+  }
+  const record = usage as Record<string, unknown>;
+  const contextTokens = claudeUsageInputTokens(record);
+  if (contextTokens <= 0) {
+    return undefined;
+  }
+  return {
+    contextTokens,
+    contextCachedTokens: finiteNonNegativeInteger(record.cache_read_input_tokens) ?? 0,
+  };
+}
+
 /**
  * Router-lane fallback: when the CLI's task usage is absent or zero, total
  * the usage observed on the subagent's own assistant snapshots instead. The
@@ -1011,21 +1044,30 @@ function withObservedTaskUsage(
   typedUsage: RuntimeTaskUsage | undefined,
   agent: ClaudeTaskAgentState | undefined,
 ): RuntimeTaskUsage | undefined {
+  // Context rides along on every path: the CLI reports cumulative totals but
+  // never how full the window is, so even a healthy typedUsage needs it.
+  const withContext = (usage: RuntimeTaskUsage | undefined): RuntimeTaskUsage | undefined => {
+    const observedContext = agent?.latestObservedContext;
+    if (usage === undefined || observedContext === undefined) {
+      return usage;
+    }
+    return { ...usage, ...observedContext };
+  };
   if (typedUsage !== undefined && typedUsage.totalTokens > 0) {
-    return typedUsage;
+    return withContext(typedUsage);
   }
   const observed = agent?.observedUsageByMessageId;
   if (observed === undefined || observed.size === 0) {
-    return typedUsage;
+    return withContext(typedUsage);
   }
   let totalTokens = 0;
   for (const value of observed.values()) {
     totalTokens += value;
   }
   if (totalTokens <= 0) {
-    return typedUsage;
+    return withContext(typedUsage);
   }
-  return { ...(typedUsage ?? {}), totalTokens };
+  return withContext({ ...(typedUsage ?? {}), totalTokens });
 }
 
 /** SDK task_updated patch status → the shared wire vocabulary. */
@@ -2962,6 +3004,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           owningAgent.observedUsageByMessageId ??= new Map();
           owningAgent.observedUsageByMessageId.set(messageId, observedTotal);
         }
+        const observedContext = claudeMessageContext(apiMessage.usage);
+        if (observedContext !== undefined) {
+          owningAgent.latestObservedContext = observedContext;
+        }
       }
       context.lastAssistantUuid = message.uuid;
       yield* updateResumeCursor(context);
@@ -3303,6 +3349,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           effort,
           observedUsageByMessageId: context.taskAgents.get(message.task_id)
             ?.observedUsageByMessageId,
+          latestObservedContext: context.taskAgents.get(message.task_id)?.latestObservedContext,
         });
         context.liveTaskIds.add(message.task_id);
         yield* offerRuntimeEvent({

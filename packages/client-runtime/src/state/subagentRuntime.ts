@@ -37,6 +37,9 @@ export interface SubagentUsage {
   readonly reasoningOutputTokens?: number;
   readonly toolUses?: number;
   readonly durationMs?: number;
+  /** Live context of the newest call; not a sum. See RuntimeTaskUsage. */
+  readonly contextTokens?: number;
+  readonly contextCachedTokens?: number;
 }
 
 export interface SubagentActivityEntry {
@@ -163,6 +166,8 @@ function asUsage(value: unknown): SubagentUsage | undefined {
     reasoningOutputTokens?: number;
     toolUses?: number;
     durationMs?: number;
+    contextTokens?: number;
+    contextCachedTokens?: number;
   } = { totalTokens };
   const inputTokens = asCount(record.inputTokens);
   if (inputTokens !== undefined) usage.inputTokens = inputTokens;
@@ -172,6 +177,10 @@ function asUsage(value: unknown): SubagentUsage | undefined {
   if (outputTokens !== undefined) usage.outputTokens = outputTokens;
   const reasoningOutputTokens = asCount(record.reasoningOutputTokens);
   if (reasoningOutputTokens !== undefined) usage.reasoningOutputTokens = reasoningOutputTokens;
+  const contextTokens = asCount(record.contextTokens);
+  if (contextTokens !== undefined) usage.contextTokens = contextTokens;
+  const contextCachedTokens = asCount(record.contextCachedTokens);
+  if (contextCachedTokens !== undefined) usage.contextCachedTokens = contextCachedTokens;
   const toolUses = asCount(record.toolUses);
   if (toolUses !== undefined) usage.toolUses = toolUses;
   const durationMs = asCount(record.durationMs);
@@ -209,6 +218,8 @@ function mergeUsageMax(
     reasoningOutputTokens?: number;
     toolUses?: number;
     durationMs?: number;
+    contextTokens?: number;
+    contextCachedTokens?: number;
   } = { totalTokens: Math.max(current.totalTokens, incoming.totalTokens) };
   const inputTokens = pick(current.inputTokens, incoming.inputTokens);
   if (inputTokens !== undefined) merged.inputTokens = inputTokens;
@@ -218,6 +229,17 @@ function mergeUsageMax(
   if (outputTokens !== undefined) merged.outputTokens = outputTokens;
   const reasoningOutputTokens = pick(current.reasoningOutputTokens, incoming.reasoningOutputTokens);
   if (reasoningOutputTokens !== undefined) merged.reasoningOutputTokens = reasoningOutputTokens;
+  // Context and its cache share come from ONE call and must move together:
+  // maxing them apart would pair a big context with another call's cache
+  // read and report an impossible ratio. Highest context wins the pair.
+  const contextSource =
+    (incoming.contextTokens ?? -1) >= (current.contextTokens ?? -1) ? incoming : current;
+  if (contextSource.contextTokens !== undefined) {
+    merged.contextTokens = contextSource.contextTokens;
+    if (contextSource.contextCachedTokens !== undefined) {
+      merged.contextCachedTokens = contextSource.contextCachedTokens;
+    }
+  }
   const toolUses = pick(current.toolUses, incoming.toolUses);
   if (toolUses !== undefined) merged.toolUses = toolUses;
   const durationMs = pick(current.durationMs, incoming.durationMs);
@@ -941,6 +963,27 @@ export function formatSubagentModelLabel(
 export function subagentWorkTokens(usage: SubagentUsage | null | undefined): number {
   if (usage === null || usage === undefined) return 0;
   return Math.max(0, usage.totalTokens - (usage.cachedInputTokens ?? 0));
+}
+
+/**
+ * How full the agent's context is, and how much of it the provider served
+ * from cache — the two numbers that say whether an agent is near its window
+ * and whether its calls are cheap. Returns null when the provider reported
+ * no context (older servers, or an agent that never made a call).
+ */
+export function subagentContextLabels(
+  usage: SubagentUsage | null | undefined,
+): { readonly context: string; readonly cached: string | null } | null {
+  const contextTokens = usage?.contextTokens;
+  if (contextTokens === undefined || contextTokens <= 0) return null;
+  const cachedTokens = usage?.contextCachedTokens;
+  return {
+    context: `${formatSubagentTokenCount(contextTokens)} ctx`,
+    cached:
+      cachedTokens === undefined
+        ? null
+        : `${Math.round((Math.min(cachedTokens, contextTokens) / contextTokens) * 100)}% cached`,
+  };
 }
 
 export function formatSubagentTokenCount(totalTokens: number): string {

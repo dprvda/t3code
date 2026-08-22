@@ -482,6 +482,13 @@ export const RuntimeTaskUsage = Schema.Struct({
   reasoningOutputTokens: Schema.optional(NonNegativeInt),
   toolUses: Schema.optional(NonNegativeInt),
   durationMs: Schema.optional(NonNegativeInt),
+  /**
+   * Live context of the agent's most recent call, and the cache-read share of
+   * it. Distinct from the cumulative fields above: those sum every call, so
+   * they answer "how much was processed", never "how full is the window".
+   */
+  contextTokens: Schema.optional(NonNegativeInt),
+  contextCachedTokens: Schema.optional(NonNegativeInt),
 });
 export type RuntimeTaskUsage = typeof RuntimeTaskUsage.Type;
 

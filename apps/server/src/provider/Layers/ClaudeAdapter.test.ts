@@ -1790,11 +1790,23 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(completed?.type, "task.completed");
       if (completed?.type === "task.completed") {
         const typedUsage = (
-          completed.payload as { typedUsage?: { totalTokens?: number; toolUses?: number } }
+          completed.payload as {
+            typedUsage?: {
+              totalTokens?: number;
+              toolUses?: number;
+              contextTokens?: number;
+              contextCachedTokens?: number;
+            };
+          }
         ).typedUsage;
         // 18_536+195 (msg_2 once) + 4_222+17_920+47 (msg_3)
         assert.equal(typedUsage?.totalTokens, 40_920);
         assert.equal(typedUsage?.toolUses, 1);
+        // Context is the NEWEST call's input side alone (msg_3:
+        // 4_222 + 17_920), never the sum — every call resends the
+        // conversation, so summing would count the window once per call.
+        assert.equal(typedUsage?.contextTokens, 22_142);
+        assert.equal(typedUsage?.contextCachedTokens, 17_920);
       }
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),

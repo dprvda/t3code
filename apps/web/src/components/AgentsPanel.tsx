@@ -20,6 +20,7 @@ import type {
 import {
   formatSubagentModelLabel,
   formatSubagentTokenCount,
+  subagentContextLabels,
   subagentWorkTokens,
 } from "@t3tools/client-runtime/state/subagentRuntime";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
@@ -154,8 +155,11 @@ function AgentRow({
     agent.role?.trim().toLocaleLowerCase() === agent.title.trim().toLocaleLowerCase()
       ? null
       : agent.role;
+  const contextLabels = subagentContextLabels(agent.usage);
   const metadata = [
     modelLabel,
+    contextLabels?.context ?? null,
+    contextLabels?.cached ?? null,
     agent.usage ? `${formatSubagentTokenCount(subagentWorkTokens(agent.usage))} tok` : "— tok",
     agent.usage?.toolUses !== undefined ? `${agent.usage.toolUses} tools` : null,
     agent.activationCount > 1 ? `run ${agent.activationCount}` : null,

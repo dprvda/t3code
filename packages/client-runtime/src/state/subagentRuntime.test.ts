@@ -6,6 +6,7 @@ import {
   formatSubagentModelLabel,
   formatSubagentTokenCount,
   isAgentAttributedToolActivity,
+  subagentContextLabels,
   subagentWorkTokens,
   isSubagentActivityKind,
   isTimelineBypassActivity,
@@ -185,6 +186,24 @@ describe("foldSubagentActivities", () => {
       activity("task.progress", { taskId: "task-5", typedUsage: { totalTokens: 500 } }),
     ]);
     expect(agents[0]!.usage).toEqual({ totalTokens: 900, inputTokens: 700 });
+  });
+
+  it("context and its cache share stay paired when frames arrive out of order", () => {
+    const agents = fold([
+      activity("task.started", { taskId: "ctx-1", taskType: "local_agent" }),
+      activity("task.progress", {
+        taskId: "ctx-1",
+        typedUsage: { totalTokens: 900, contextTokens: 210_000, contextCachedTokens: 205_800 },
+      }),
+      // A late, smaller frame must not donate its cache read to the bigger
+      // context — that pairing would report an impossible ratio.
+      activity("task.progress", {
+        taskId: "ctx-1",
+        typedUsage: { totalTokens: 400, contextTokens: 12_000, contextCachedTokens: 0 },
+      }),
+    ]);
+    expect(agents[0]!.usage?.contextTokens).toBe(210_000);
+    expect(agents[0]!.usage?.contextCachedTokens).toBe(205_800);
   });
 
   it("usage snapshots enrich an existing agent without changing its status", () => {
@@ -901,5 +920,36 @@ describe("subagentWorkTokens", () => {
     expect(subagentWorkTokens(undefined)).toBe(0);
     // Folded agents carry a null usage until a provider reports one.
     expect(subagentWorkTokens(null)).toBe(0);
+  });
+});
+
+describe("subagentContextLabels", () => {
+  it("reports live context and the cached share of it", () => {
+    expect(
+      subagentContextLabels({
+        totalTokens: 5_000_000,
+        contextTokens: 210_000,
+        contextCachedTokens: 205_800,
+      }),
+    ).toEqual({ context: "210k ctx", cached: "98% cached" });
+  });
+
+  it("returns null when the provider reported no context", () => {
+    // Older servers send usage without the context pair; the row must fall
+    // back to work tokens rather than render "0 ctx".
+    expect(subagentContextLabels({ totalTokens: 40_920 })).toBeNull();
+    expect(subagentContextLabels({ totalTokens: 10, contextTokens: 0 })).toBeNull();
+    expect(subagentContextLabels(null)).toBeNull();
+  });
+
+  it("omits the cache label when only context is known, and never exceeds 100%", () => {
+    expect(subagentContextLabels({ totalTokens: 10, contextTokens: 1_000 })).toEqual({
+      context: "1.0k ctx",
+      cached: null,
+    });
+    expect(
+      subagentContextLabels({ totalTokens: 10, contextTokens: 1_000, contextCachedTokens: 9_999 })
+        ?.cached,
+    ).toBe("100% cached");
   });
 });
