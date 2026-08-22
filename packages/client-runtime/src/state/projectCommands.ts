@@ -72,6 +72,18 @@ export function createProjectEnvironmentAtoms<R, E>(
       staleTimeMs: 30_000,
       idleTtlMs: 5 * 60_000,
     }),
+    docMap: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:projects:doc-map",
+      tag: WS_METHODS.projectsDocMap,
+      staleTimeMs: 30_000,
+      idleTtlMs: 5 * 60_000,
+    }),
+    launchDocs: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:projects:launch-docs",
+      tag: WS_METHODS.projectsLaunchDocsGet,
+      staleTimeMs: 15_000,
+      idleTtlMs: 5 * 60_000,
+    }),
     readFile: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:projects:read-file",
       tag: WS_METHODS.projectsReadFile,
@@ -97,6 +109,15 @@ export function createProjectEnvironmentAtoms<R, E>(
       execute: (input: DeleteProjectInput) => deleteProject(input),
       scheduler: projectScheduler,
       concurrency: projectConcurrency,
+    }),
+    launchDocsSet: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projects:launch-docs-set",
+      tag: WS_METHODS.projectsLaunchDocsSet,
+      scheduler: fileScheduler,
+      concurrency: {
+        mode: "serial",
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.cwd]),
+      },
     }),
     writeFile: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projects:write-file",

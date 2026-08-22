@@ -36,6 +36,7 @@ import {
   type ProjectFileFailure,
   type ProjectFileOperation,
   ProjectListEntriesError,
+  ProjectLaunchDocsError,
   RouterPoolError,
   SubagentViewError,
   ProjectReadFileError,
@@ -93,6 +94,13 @@ import { issueAssetUrl } from "./assets/AssetAccess.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import { docBricks } from "./workspace/docBricks.ts";
+import {
+  docMap,
+  launchDocsPrefix,
+  readLaunchDocsInclude,
+  resolveLaunchDocs,
+  writeLaunchDocsInclude,
+} from "./workspace/launchDocs.ts";
 import { makeRouterAccounts, makeRouterLoginRunner } from "./provider/routerAccounts.ts";
 import { claudeSeatConfigDir } from "./orchestration/Layers/ClaudeSeatRotationReactor.ts";
 import { listSubagentRuns, readSubagentTranscript } from "./provider/subagentTranscripts.ts";
@@ -998,7 +1006,37 @@ const makeWsRpcLayer = (
 
             yield* runSetupProgram();
 
-            return yield* orchestrationEngine.dispatch(finalTurnStartCommand);
+            // Session-start doc injection: a NEW thread's first message gets
+            // the workspace's launch-docs read-first block (config lives at
+            // .t3/launch-docs.json in the PROJECT root — a fresh worktree may
+            // not carry an uncommitted config). Never blocks a launch.
+            let turnStartCommand = finalTurnStartCommand;
+            if (bootstrap?.createThread) {
+              const workspaceRoot =
+                targetProjectCwd ??
+                (yield* projectionSnapshotQuery
+                  .getProjectShellById(bootstrap.createThread.projectId)
+                  .pipe(
+                    Effect.map(
+                      Option.match({
+                        onNone: () => null,
+                        onSome: (project) => project.workspaceRoot,
+                      }),
+                    ),
+                    Effect.catchCause(() => Effect.succeed(null)),
+                  ));
+              const prefix = workspaceRoot === null ? null : launchDocsPrefix(workspaceRoot);
+              if (prefix !== null) {
+                turnStartCommand = {
+                  ...finalTurnStartCommand,
+                  message: {
+                    ...finalTurnStartCommand.message,
+                    text: prefix + finalTurnStartCommand.message.text,
+                  },
+                };
+              }
+            }
+            return yield* orchestrationEngine.dispatch(turnStartCommand);
           });
 
           return yield* bootstrapProgram.pipe(
@@ -1956,6 +1994,47 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             WS_METHODS.projectsDocBricks,
             Effect.sync(() => ({ bricks: docBricks(input.cwd, input.extras ?? []) })),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.projectsDocMap]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsDocMap,
+            Effect.try({
+              try: () => ({ entries: docMap(input.cwd) }),
+              catch: (cause) =>
+                new ProjectLaunchDocsError({
+                  cwd: input.cwd,
+                  message: "Failed to scan the workspace doc map.",
+                  cause,
+                }),
+            }),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.projectsLaunchDocsGet]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsLaunchDocsGet,
+            Effect.sync(() => {
+              const include = readLaunchDocsInclude(input.cwd);
+              return { include, resolved: resolveLaunchDocs(input.cwd, include) };
+            }),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.projectsLaunchDocsSet]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsLaunchDocsSet,
+            Effect.try({
+              try: () => {
+                writeLaunchDocsInclude(input.cwd, input.include);
+                const include = readLaunchDocsInclude(input.cwd);
+                return { include, resolved: resolveLaunchDocs(input.cwd, include) };
+              },
+              catch: (cause) =>
+                new ProjectLaunchDocsError({
+                  cwd: input.cwd,
+                  message: "Failed to save the launch docs selection.",
+                  cause,
+                }),
+            }),
             { "rpc.aggregate": "workspace" },
           ),
         [WS_METHODS.projectsListEntries]: (input) =>

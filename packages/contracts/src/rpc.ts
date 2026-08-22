@@ -101,6 +101,12 @@ import {
 import {
   ProjectListEntriesError,
   ProjectDocBricksInput,
+  ProjectDocMapInput,
+  ProjectDocMapResult,
+  ProjectLaunchDocsError,
+  ProjectLaunchDocsGetInput,
+  ProjectLaunchDocsResult,
+  ProjectLaunchDocsSetInput,
   ProjectDocBricksResult,
   ProjectListEntriesInput,
   ProjectListEntriesResult,
@@ -218,6 +224,9 @@ export const WS_METHODS = {
   projectsRemove: "projects.remove",
   projectsListEntries: "projects.listEntries",
   projectsDocBricks: "projects.docBricks",
+  projectsDocMap: "projects.docMap",
+  projectsLaunchDocsGet: "projects.launchDocs.get",
+  projectsLaunchDocsSet: "projects.launchDocs.set",
 
   // CLIProxyAPI router pool methods
   routerAccounts: "router.accounts",
@@ -671,6 +680,24 @@ export const WsProjectsDocBricksRpc = Rpc.make(WS_METHODS.projectsDocBricks, {
   error: Schema.Union([ProjectListEntriesError, EnvironmentAuthorizationError]),
 });
 
+export const WsProjectsDocMapRpc = Rpc.make(WS_METHODS.projectsDocMap, {
+  payload: ProjectDocMapInput,
+  success: ProjectDocMapResult,
+  error: Schema.Union([ProjectLaunchDocsError, EnvironmentAuthorizationError]),
+});
+
+export const WsProjectsLaunchDocsGetRpc = Rpc.make(WS_METHODS.projectsLaunchDocsGet, {
+  payload: ProjectLaunchDocsGetInput,
+  success: ProjectLaunchDocsResult,
+  error: Schema.Union([ProjectLaunchDocsError, EnvironmentAuthorizationError]),
+});
+
+export const WsProjectsLaunchDocsSetRpc = Rpc.make(WS_METHODS.projectsLaunchDocsSet, {
+  payload: ProjectLaunchDocsSetInput,
+  success: ProjectLaunchDocsResult,
+  error: Schema.Union([ProjectLaunchDocsError, EnvironmentAuthorizationError]),
+});
+
 export const WsRouterAccountsRpc = Rpc.make(WS_METHODS.routerAccounts, {
   payload: RouterAccountsInput,
   success: RouterAccountsResult,
@@ -1098,6 +1125,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,
   WsProjectsDocBricksRpc,
+  WsProjectsDocMapRpc,
+  WsProjectsLaunchDocsGetRpc,
+  WsProjectsLaunchDocsSetRpc,
   WsRouterAccountsRpc,
   WsRouterAccountToggleRpc,
   WsRouterLoginStartRpc,

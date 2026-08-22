@@ -96,6 +96,52 @@ export const ProjectDocBricksResult = Schema.Struct({
 });
 export type ProjectDocBricksResult = typeof ProjectDocBricksResult.Type;
 
+export const ProjectDocMapEntry = Schema.Struct({
+  rel: TrimmedNonEmptyString,
+  kind: Schema.Literals(["dir", "doc"]),
+  // chars/4 estimate; dir entries roll up every doc beneath them
+  tokens: Schema.Int,
+});
+export type ProjectDocMapEntry = typeof ProjectDocMapEntry.Type;
+
+export const ProjectDocMapInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+});
+export type ProjectDocMapInput = typeof ProjectDocMapInput.Type;
+
+export const ProjectDocMapResult = Schema.Struct({
+  entries: Schema.Array(ProjectDocMapEntry),
+});
+export type ProjectDocMapResult = typeof ProjectDocMapResult.Type;
+
+export const ProjectLaunchDocsGetInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+});
+export type ProjectLaunchDocsGetInput = typeof ProjectLaunchDocsGetInput.Type;
+
+export const ProjectLaunchDocsSetInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  include: Schema.Array(Schema.String),
+});
+export type ProjectLaunchDocsSetInput = typeof ProjectLaunchDocsSetInput.Type;
+
+// include = the stored selection (folder entries end in "/");
+// resolved = its expansion into concrete docs at read time.
+export const ProjectLaunchDocsResult = Schema.Struct({
+  include: Schema.Array(Schema.String),
+  resolved: Schema.Array(ProjectDocBrick),
+});
+export type ProjectLaunchDocsResult = typeof ProjectLaunchDocsResult.Type;
+
+export class ProjectLaunchDocsError extends Schema.TaggedErrorClass<ProjectLaunchDocsError>()(
+  "ProjectLaunchDocsError",
+  {
+    cwd: TrimmedNonEmptyString,
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
 export const ProjectListEntriesResult = Schema.Struct({
   entries: Schema.Array(ProjectEntry),
   truncated: Schema.Boolean,
