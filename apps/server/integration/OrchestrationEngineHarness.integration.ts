@@ -52,6 +52,7 @@ import {
 } from "../src/orchestration/Layers/ClaudeSeatRotationReactor.ts";
 import { ClaudeSeatRotationReactor } from "../src/orchestration/Services/ClaudeSeatRotationReactor.ts";
 import { ContextRecycleReactorLive } from "../src/orchestration/Layers/ContextRecycleReactor.ts";
+import { ScheduleReactor } from "../src/orchestration/Services/ScheduleReactor.ts";
 import { ContextRecycleReactor } from "../src/orchestration/Services/ContextRecycleReactor.ts";
 import * as RepositoryIdentityResolver from "../src/project/RepositoryIdentityResolver.ts";
 import { OrchestrationEngineLive } from "../src/orchestration/Layers/OrchestrationEngine.ts";
@@ -403,6 +404,12 @@ export const makeOrchestrationIntegrationHarness = (
         Layer.succeed(ThreadDeletionReactor, {
           start: () => Effect.void,
           drain: Effect.void,
+        }),
+      ),
+      Layer.provideMerge(
+        Layer.succeed(ScheduleReactor, {
+          start: () => Effect.void,
+          tick: Effect.void,
         }),
       ),
       Layer.provideMerge(

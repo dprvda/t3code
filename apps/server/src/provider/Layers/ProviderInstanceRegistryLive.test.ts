@@ -106,6 +106,7 @@ const makeClaudeConfig = (overrides: Partial<ClaudeSettings>): ClaudeSettings =>
   homePath: "",
   continuationGroup: "",
   contextWindowTokens: 0,
+  recycleThresholdTokens: 0,
   customModels: [],
   launchArgs: "",
   ...overrides,

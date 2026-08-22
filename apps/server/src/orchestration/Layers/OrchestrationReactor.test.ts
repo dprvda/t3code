@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { CheckpointReactor } from "../Services/CheckpointReactor.ts";
 import { ClaudeSeatRotationReactor } from "../Services/ClaudeSeatRotationReactor.ts";
 import { ContextRecycleReactor } from "../Services/ContextRecycleReactor.ts";
+import { ScheduleReactor } from "../Services/ScheduleReactor.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
 import { ThreadDeletionReactor } from "../Services/ThreadDeletionReactor.ts";
@@ -85,6 +86,15 @@ describe("OrchestrationReactor", () => {
           }),
         ),
         Layer.provideMerge(
+          Layer.succeed(ScheduleReactor, {
+            start: () => {
+              started.push("schedule-reactor");
+              return Effect.void;
+            },
+            tick: Effect.void,
+          }),
+        ),
+        Layer.provideMerge(
           Layer.succeed(AgentAwarenessRelay.AgentAwarenessRelay, {
             publishThread: () => Effect.void,
             start: () => {
@@ -107,6 +117,7 @@ describe("OrchestrationReactor", () => {
       "thread-deletion-reactor",
       "claude-seat-rotation-reactor",
       "context-recycle-reactor",
+      "schedule-reactor",
       "agent-awareness-relay",
     ]);
 

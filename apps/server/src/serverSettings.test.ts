@@ -190,6 +190,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         homePath: "",
         continuationGroup: "",
         contextWindowTokens: 0,
+        recycleThresholdTokens: 0,
         customModels: ["claude-custom"],
         launchArgs: "",
       });
@@ -583,6 +584,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         homePath: "",
         continuationGroup: "",
         contextWindowTokens: 0,
+        recycleThresholdTokens: 0,
         customModels: [],
         launchArgs: "",
       });

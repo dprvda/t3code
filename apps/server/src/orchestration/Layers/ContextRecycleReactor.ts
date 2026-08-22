@@ -53,6 +53,31 @@ import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts"
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
+/**
+ * Per-instance recycle threshold from the instance's Claude config blob
+ * (`recycleThresholdTokens`, 0/absent = none). Explicit instances carry it in
+ * `providerInstances`; the built-in `claudeAgent` slot in `providers.claudeAgent`.
+ * Defensive read — the blob is `Schema.Unknown` at the settings layer.
+ */
+function instanceRecycleThresholdTokens(
+  settings: {
+    readonly providerInstances: Record<string, { readonly config?: unknown } | undefined>;
+    readonly providers: { readonly claudeAgent: unknown };
+  },
+  instanceId: string,
+): number | null {
+  const explicit = settings.providerInstances[instanceId];
+  const config: unknown =
+    explicit !== undefined
+      ? explicit.config
+      : instanceId === "claudeAgent"
+        ? settings.providers.claudeAgent
+        : undefined;
+  if (config === null || typeof config !== "object") return null;
+  const value = (config as { recycleThresholdTokens?: unknown }).recycleThresholdTokens;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
 type RecycleRuntimeEvent = Extract<
   ProviderRuntimeEvent,
   { type: "thread.token-usage.updated" } | { type: "item.completed" } | { type: "turn.completed" }
@@ -273,10 +298,20 @@ const make = Effect.gen(function* () {
       if (settings === undefined || !settings.contextRecycle.enabled) return;
       const { usedTokens, maxTokens } = event.payload.usage;
       if (usedTokens === undefined || usedTokens <= 0) return;
-      // Absolute token threshold, plus a fixed 90%-of-window fallback so
-      // models with windows smaller than the threshold still recycle.
+      // Cheap pre-filter before the projection lookup: no configuration
+      // recycles below this.
+      if (usedTokens < 50_000) return;
+      const thread = yield* resolveThread(threadId);
+      if (!thread) return;
+      // Per-instance override first (e.g. 250k on the routed lane, whose
+      // backend prefill slows sharply past ~250k), then the global
+      // threshold, plus a fixed 90%-of-window fallback so models with
+      // windows smaller than the threshold still recycle.
+      const thresholdTokens =
+        instanceRecycleThresholdTokens(settings, thread.modelSelection.instanceId) ??
+        settings.contextRecycle.thresholdTokens;
       const overThreshold =
-        usedTokens >= settings.contextRecycle.thresholdTokens ||
+        usedTokens >= thresholdTokens ||
         (maxTokens !== undefined && maxTokens > 0 && usedTokens / maxTokens >= 0.9);
       const existing = states.get(threadKey);
       if (existing?.phase === "cooldown") {
@@ -285,8 +320,6 @@ const make = Effect.gen(function* () {
       }
       if (existing !== undefined) return;
       if (!overThreshold) return;
-      const thread = yield* resolveThread(threadId);
-      if (!thread) return;
       if (thread.latestTurn?.state === "running") {
         // can't inject a turn mid-turn: arm, fire on the turn boundary
         states.set(threadKey, { phase: "armed", pct: usedTokens });

@@ -63,6 +63,7 @@ import {
   ClaudeSeatRotationReactorLive,
 } from "./orchestration/Layers/ClaudeSeatRotationReactor.ts";
 import { ContextRecycleReactorLive } from "./orchestration/Layers/ContextRecycleReactor.ts";
+import { ScheduleReactorLive } from "./orchestration/Layers/ScheduleReactor.ts";
 import { ThreadDeletionReactorLive } from "./orchestration/Layers/ThreadDeletionReactor.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
@@ -258,6 +259,7 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(
     ContextRecycleReactorLive.pipe(Layer.provide(ProviderSessionDirectoryLayerLive)),
   ),
+  Layer.provideMerge(ScheduleReactorLive),
   Layer.provideMerge(AgentAwarenessRelay.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provideMerge(RuntimeReceiptBusLive),
 );

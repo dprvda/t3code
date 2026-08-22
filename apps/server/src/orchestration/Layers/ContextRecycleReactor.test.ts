@@ -111,6 +111,7 @@ describe("ContextRecycleReactor", () => {
     readonly thresholdTokens?: number;
     readonly enabled?: boolean;
     readonly maxTurns?: number;
+    readonly instanceRecycleThresholdTokens?: number;
   }) {
     const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-recycle-"));
     createdDirs.add(baseDir);
@@ -163,6 +164,13 @@ describe("ContextRecycleReactor", () => {
         thresholdTokens: input?.thresholdTokens ?? 600_000,
         ...(input?.maxTurns !== undefined ? { maxTurns: input.maxTurns } : {}),
       },
+      ...(input?.instanceRecycleThresholdTokens !== undefined
+        ? {
+            providers: {
+              claudeAgent: { recycleThresholdTokens: input.instanceRecycleThresholdTokens },
+            },
+          }
+        : {}),
     });
     const layer = ContextRecycleReactorLive.pipe(
       Layer.provideMerge(orchestrationLayer),
@@ -331,6 +339,25 @@ describe("ContextRecycleReactor", () => {
       (entry) => entry.kind === "context-recycle.handoff-requested",
     );
     expect(requested).toBeDefined();
+  });
+
+  it("per-instance recycleThresholdTokens overrides the global threshold", async () => {
+    // global 600k, instance 250k: a 300k crossing must recycle
+    const harness = await createHarness({ instanceRecycleThresholdTokens: 250_000 });
+    await harness.emitUsage("evt-instance-threshold", 300_000, 1_000_000);
+    await waitFor(async () => (await harness.messagesWith(STANDARD_HANDOFF_PROMPT)).length > 0);
+    await harness.drain();
+    const thread = await harness.readThread();
+    expect(
+      thread.activities.some((entry) => entry.kind === "context-recycle.handoff-requested"),
+    ).toBe(true);
+  });
+
+  it("below both thresholds nothing fires", async () => {
+    const harness = await createHarness({ instanceRecycleThresholdTokens: 250_000 });
+    await harness.emitUsage("evt-under", 200_000, 1_000_000);
+    await harness.drain();
+    expect(await harness.messagesWith(STANDARD_HANDOFF_PROMPT)).toHaveLength(0);
   });
 
   it("maxTurns: the Nth completed turn requests a handoff without a token crossing", async () => {

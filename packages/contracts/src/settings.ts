@@ -420,6 +420,15 @@ export const ClaudeSettings = makeProviderSettingsSchema(
         providerSettingsForm: { placeholder: "0", clearWhenEmpty: "omit" },
       }),
     ),
+    recycleThresholdTokens: Schema.Int.pipe(
+      Schema.withDecodingDefault(Effect.succeed(0)),
+      Schema.annotateKey({
+        title: "Recycle threshold tokens",
+        description:
+          "Per-instance context-recycle threshold. Overrides the global setting for threads on this instance — e.g. 250000 keeps routed (Codex) sessions fast, whose backend prefill slows sharply past ~250k. 0 uses the global threshold.",
+        providerSettingsForm: { placeholder: "0", clearWhenEmpty: "omit" },
+      }),
+    ),
     customModels: Schema.Array(Schema.String).pipe(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
@@ -596,6 +605,25 @@ export const ContextRecycleSettings = Schema.Struct({
 });
 export type ContextRecycleSettings = typeof ContextRecycleSettings.Type;
 
+/**
+ * A scheduled launch (ADE schedules port): on the given local weekdays
+ * (0 = Sunday … 6 = Saturday), at or after hour:minute, at most once per
+ * day, start a NEW thread in the named project with the prompt as its first
+ * message (session-start doc injection and launch doctrine apply as on any
+ * fresh thread).
+ */
+export const ScheduledLaunch = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  name: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  projectTitle: TrimmedNonEmptyString,
+  prompt: TrimmedNonEmptyString,
+  days: Schema.Array(Schema.Int),
+  hour: Schema.Int,
+  minute: Schema.Int,
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+});
+export type ScheduledLaunch = typeof ScheduledLaunch.Type;
+
 export const SourceControlWritingStyleSettings = Schema.Struct({
   mode: SourceControlWritingStyleMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("repo_conventions" as const)),
@@ -714,6 +742,8 @@ export const ServerSettings = Schema.Struct({
   sidebarProjectGroups: Schema.Array(SidebarProjectGroup).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
+  /** Scheduled launches; empty = scheduler idle. */
+  schedules: Schema.Array(ScheduledLaunch).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   sourceControlWriterModelSelection: Schema.NullOr(ModelSelection).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
@@ -854,6 +884,7 @@ const ClaudeSettingsPatch = Schema.Struct({
   homePath: Schema.optionalKey(TrimmedString),
   continuationGroup: Schema.optionalKey(TrimmedString),
   contextWindowTokens: Schema.optionalKey(Schema.Int),
+  recycleThresholdTokens: Schema.optionalKey(Schema.Int),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
   launchArgs: Schema.optionalKey(TrimmedString),
 });
@@ -915,6 +946,7 @@ export const ServerSettingsPatch = Schema.Struct({
     }),
   ),
   sidebarProjectGroups: Schema.optionalKey(Schema.Array(SidebarProjectGroup)),
+  schedules: Schema.optionalKey(Schema.Array(ScheduledLaunch)),
   observability: Schema.optionalKey(
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(TrimmedString),
