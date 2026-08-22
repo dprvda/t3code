@@ -182,6 +182,18 @@ const projectWebProbeSnapshot = (
   return [...visibleByServer.values()].toSorted((left, right) => left.port - right.port);
 };
 
+/**
+ * Fork safety rule: probe ONLY listeners that belong to processes t3code
+ * itself spawned (thread terminals and their descendants). Probing every
+ * listening port on the machine connected to unrelated local services —
+ * including browser control ports where any inbound connection means
+ * "shut down" — and killed them. Configured preview URLs are still probed
+ * because the owner opted into them explicitly.
+ */
+const onlyOwnedListeners = (
+  servers: ReadonlyArray<DiscoveredLocalServer>,
+): ReadonlyArray<DiscoveredLocalServer> => servers.filter((server) => server.terminal !== null);
+
 const parseLsofOutput = (
   raw: string,
   terminalByProcessId: ReadonlyMap<number, TerminalProcessOwner> = new Map(),
@@ -301,30 +313,6 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
   });
   const webProbeCacheRef = yield* Ref.make<ReadonlyMap<string, WebProbeCacheEntry>>(new Map());
   const scanSemaphore = yield* Semaphore.make(1);
-
-  const probeCommonPorts = Effect.fn("PortDiscovery.probeCommonPorts")(function* () {
-    const results = yield* Effect.forEach(
-      COMMON_DEV_PORTS,
-      (port) =>
-        net.isPortAvailableOnLoopback(port).pipe(
-          Effect.map((available) => ({
-            port,
-            listening: !available,
-          })),
-        ),
-      { concurrency: "unbounded" },
-    );
-    return results
-      .filter((result) => result.listening)
-      .map<DiscoveredLocalServer>((result) => ({
-        host: "localhost",
-        port: result.port,
-        url: `http://localhost:${result.port}`,
-        processName: null,
-        pid: null,
-        terminal: null,
-      }));
-  });
 
   const probeWebUrl = Effect.fn("PortDiscovery.probeWebUrl")((url: string) =>
     httpClient.get(url).pipe(
@@ -509,8 +497,10 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
             ProcessTimeoutError: recoverWindowsProbeFailure,
           }),
         );
-      if (listeners !== null) return yield* probeWebServers(listeners, configuredUrls);
-      return yield* probeWebServers(yield* probeCommonPorts(), configuredUrls);
+      if (listeners !== null) {
+        return yield* probeWebServers(onlyOwnedListeners(listeners), configuredUrls);
+      }
+      return yield* probeWebServers([], configuredUrls);
     }
     const recoverLsofProbeFailure = recoverProcessProbeFailure("lsof");
     const lsofResult = yield* processRunner
@@ -531,8 +521,10 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
           ProcessTimeoutError: recoverLsofProbeFailure,
         }),
       );
-    if (lsofResult !== null) return yield* probeWebServers(lsofResult, configuredUrls);
-    return yield* probeWebServers(yield* probeCommonPorts(), configuredUrls);
+    if (lsofResult !== null) {
+      return yield* probeWebServers(onlyOwnedListeners(lsofResult), configuredUrls);
+    }
+    return yield* probeWebServers([], configuredUrls);
   });
 
   const scanSnapshot = Effect.fn("PortDiscovery.scanSnapshot")(

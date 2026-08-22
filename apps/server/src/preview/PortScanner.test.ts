@@ -206,14 +206,20 @@ const commonNonHttpServer = Effect.acquireRelease(
  */
 effectIt.layer(TestPortDiscoveryLive)("PortDiscovery integration (TCP probe fallback)", (it) => {
   it.effect(
-    "scan() returns an HTTP server we just opened on a curated dev port",
-    Effect.fn("PortScannerTest.scanFindsCommonDevServer")(function* () {
+    "scan() ignores an HTTP server it cannot attribute to a t3code terminal",
+    Effect.fn("PortScannerTest.scanIgnoresForeignDevServer")(function* () {
+      // Fork rule: listeners not owned by a registered terminal process are
+      // never probed — probing arbitrary local ports shut down unrelated
+      // local services (browser control ports treat any connection as quit).
       const { port } = yield* commonDevServer;
       const scanner = yield* PortScanner.PortDiscovery;
+      yield* scanner.registerTerminalProcesses({
+        threadId: "thread-test",
+        terminalId: "terminal-test",
+        processIds: [1234],
+      });
       const result = yield* scanner.scan();
-      const found = result.find((server) => server.port === port);
-      expect(found).toBeDefined();
-      expect(found?.host).toBe("localhost");
+      expect(result.some((server) => server.port === port)).toBe(false);
     }),
   );
 
@@ -222,6 +228,11 @@ effectIt.layer(TestPortDiscoveryLive)("PortDiscovery integration (TCP probe fall
     Effect.fn("PortScannerTest.scanExcludesNonHttpServer")(function* () {
       const { port } = yield* commonNonHttpServer;
       const scanner = yield* PortScanner.PortDiscovery;
+      yield* scanner.registerTerminalProcesses({
+        threadId: "thread-test",
+        terminalId: "terminal-test",
+        processIds: [1234],
+      });
       const result = yield* scanner.scan();
       expect(result.some((server) => server.port === port)).toBe(false);
     }),
@@ -233,13 +244,19 @@ effectIt.layer(TestPortDiscoveryLive)("PortDiscovery integration (TCP probe fall
       const { port } = yield* commonDevServer;
       const received: number[] = [];
       const scanner = yield* PortScanner.PortDiscovery;
+      yield* scanner.registerTerminalProcesses({
+        threadId: "thread-test",
+        terminalId: "terminal-test",
+        processIds: [1234],
+      });
       yield* scanner.subscribe({ configuredUrls: [], initialSnapshot: [] }, (servers) =>
         Effect.sync(() => {
           for (const server of servers) received.push(server.port);
         }),
       );
       yield* scanner.retain;
-      expect(received).toContain(port);
+      // The broadcast fires, but a foreign listener never appears in it.
+      expect(received).not.toContain(port);
     }),
   );
 });
@@ -257,6 +274,11 @@ effectIt.effect("revalidates a successful HTML probe after its cache entry expir
 
   return Effect.gen(function* () {
     const scanner = yield* PortScanner.PortDiscovery;
+    yield* scanner.registerTerminalProcesses({
+      threadId: "thread-test",
+      terminalId: "terminal-test",
+      processIds: [1234],
+    });
     expect(yield* scanner.scan()).toHaveLength(1);
     expect(yield* scanner.scan()).toHaveLength(1);
     expect(requests).toEqual([`http://localhost:${LSOF_TEST_PORT}/`]);
@@ -291,6 +313,11 @@ effectIt.effect("keeps a full configured URL when the discovered server root fai
 
   return Effect.gen(function* () {
     const scanner = yield* PortScanner.PortDiscovery;
+    yield* scanner.registerTerminalProcesses({
+      threadId: "thread-test",
+      terminalId: "terminal-test",
+      processIds: [1234],
+    });
     const servers = yield* scanner.scan([configuredUrl]);
     expect(servers).toHaveLength(1);
     expect(servers[0]?.url).toBe(configuredUrl);
@@ -311,6 +338,11 @@ effectIt.effect("probes configured custom ports through a canonical loopback hos
 
   return Effect.gen(function* () {
     const scanner = yield* PortScanner.PortDiscovery;
+    yield* scanner.registerTerminalProcesses({
+      threadId: "thread-test",
+      terminalId: "terminal-test",
+      processIds: [1234],
+    });
     const servers = yield* scanner.scan([configuredUrl]);
     expect(servers).toHaveLength(1);
     expect(servers[0]?.host).toBe("localhost");
@@ -336,6 +368,11 @@ effectIt.effect("preserves explicit loopback hosts and bounds wildcard rewrites"
 
   return Effect.gen(function* () {
     const scanner = yield* PortScanner.PortDiscovery;
+    yield* scanner.registerTerminalProcesses({
+      threadId: "thread-test",
+      terminalId: "terminal-test",
+      processIds: [1234],
+    });
     const servers = yield* scanner.scan([ipv4Url, ipv6Url, maximumWildcardUrl]);
     expect(servers.map((server) => server.url)).toEqual([ipv4Url, ipv6Url]);
     expect(requests).toEqual([ipv4Url, ipv6Url]);
@@ -357,6 +394,11 @@ effectIt.effect("projects configured paths independently for simultaneous subscr
 
   return Effect.gen(function* () {
     const scanner = yield* PortScanner.PortDiscovery;
+    yield* scanner.registerTerminalProcesses({
+      threadId: "thread-test",
+      terminalId: "terminal-test",
+      processIds: [1234],
+    });
     const docsSnapshots: ReadonlyArray<DiscoveredLocalServer>[] = [];
     const adminSnapshots: ReadonlyArray<DiscoveredLocalServer>[] = [];
     yield* scanner.subscribe({ configuredUrls: [docsUrl], initialSnapshot: [] }, (servers) =>
@@ -390,6 +432,11 @@ effectIt.effect(
 
     return Effect.gen(function* () {
       const scanner = yield* PortScanner.PortDiscovery;
+      yield* scanner.registerTerminalProcesses({
+        threadId: "thread-test",
+        terminalId: "terminal-test",
+        processIds: [1234],
+      });
       const secondSnapshots: ReadonlyArray<DiscoveredLocalServer>[] = [];
       yield* scanner.subscribe(
         { configuredUrls: firstSubscriberUrls, initialSnapshot: [] },
@@ -423,6 +470,11 @@ effectIt.effect("stops probing a subscriber's configured paths after its scope c
 
   return Effect.gen(function* () {
     const scanner = yield* PortScanner.PortDiscovery;
+    yield* scanner.registerTerminalProcesses({
+      threadId: "thread-test",
+      terminalId: "terminal-test",
+      processIds: [1234],
+    });
     const docsScope = yield* Scope.make();
     yield* scanner
       .subscribe({ configuredUrls: [docsUrl], initialSnapshot: [] }, () => Effect.void)
@@ -453,6 +505,11 @@ effectIt.effect("uses the current configured fragment when readiness comes from 
 
   return Effect.gen(function* () {
     const scanner = yield* PortScanner.PortDiscovery;
+    yield* scanner.registerTerminalProcesses({
+      threadId: "thread-test",
+      terminalId: "terminal-test",
+      processIds: [1234],
+    });
     expect((yield* scanner.scan([oldUrl]))[0]?.url).toBe(oldUrl);
     const requestCount = requests.length;
     expect((yield* scanner.scan([newUrl]))[0]?.url).toBe(newUrl);
@@ -471,6 +528,11 @@ effectIt.effect("shares a configured root probe with discovered-root classificat
 
   return Effect.gen(function* () {
     const scanner = yield* PortScanner.PortDiscovery;
+    yield* scanner.registerTerminalProcesses({
+      threadId: "thread-test",
+      terminalId: "terminal-test",
+      processIds: [1234],
+    });
     expect(yield* scanner.scan([rootUrl])).toHaveLength(1);
     expect(requests).toEqual([rootUrl]);
 
@@ -500,6 +562,11 @@ effectIt.effect("starts fresh cache entries after the probing batch completes", 
 
     yield* Effect.gen(function* () {
       const scanner = yield* PortScanner.PortDiscovery;
+      yield* scanner.registerTerminalProcesses({
+        threadId: "thread-test",
+        terminalId: "terminal-test",
+        processIds: [1234],
+      });
       expect(yield* scanner.scan()).toHaveLength(1);
       expect(yield* scanner.scan()).toHaveLength(1);
       expect(requests).toHaveLength(1);
@@ -520,6 +587,11 @@ effectIt.effect("caches a failed web probe until its bounded cache entry expires
 
   return Effect.gen(function* () {
     const scanner = yield* PortScanner.PortDiscovery;
+    yield* scanner.registerTerminalProcesses({
+      threadId: "thread-test",
+      terminalId: "terminal-test",
+      processIds: [1234],
+    });
     expect(yield* scanner.scan()).toHaveLength(0);
     expect(yield* scanner.scan()).toHaveLength(0);
     expect(requests).toHaveLength(2);
@@ -545,6 +617,11 @@ effectIt.effect("falls back to HTTPS and does not follow redirects while probing
 
   return Effect.gen(function* () {
     const scanner = yield* PortScanner.PortDiscovery;
+    yield* scanner.registerTerminalProcesses({
+      threadId: "thread-test",
+      terminalId: "terminal-test",
+      processIds: [1234],
+    });
     const servers = yield* scanner.scan();
     expect(servers).toHaveLength(1);
     expect(servers[0]?.url).toBe(`https://localhost:${LSOF_TEST_PORT}`);
@@ -564,6 +641,12 @@ effectIt.effect(
 
     return Effect.gen(function* () {
       const scanner = yield* PortScanner.PortDiscovery;
+      // This test rotates the fixture pid per step; own them all.
+      yield* scanner.registerTerminalProcesses({
+        threadId: "thread-test",
+        terminalId: "terminal-test",
+        processIds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      });
       expect(yield* scanner.scan()).toHaveLength(0);
 
       pid += 1;
@@ -622,6 +705,11 @@ effectIt.effect("aborts HTTP and HTTPS probes when they time out", () => {
 
   return Effect.gen(function* () {
     const scanner = yield* PortScanner.PortDiscovery;
+    yield* scanner.registerTerminalProcesses({
+      threadId: "thread-test",
+      terminalId: "terminal-test",
+      processIds: [1234],
+    });
     const scanFiber = yield* Effect.forkChild(scanner.scan());
     yield* TestClock.adjust(Duration.seconds(2));
     expect(yield* Fiber.join(scanFiber)).toHaveLength(0);
