@@ -260,11 +260,16 @@ function ThreadGridRouteView() {
     () => new Map(projects.map((project) => [project.id, project.title] as const)),
     [projects],
   );
+  // STABLE order (owner: panes must not jump while sessions stream).
+  // createdAt never changes, so a pane keeps its position for its lifetime;
+  // sorting by updatedAt reshuffled the wall on every activity tick.
   const panes = useMemo(
     () =>
       shells
         .filter((shell) => shell.archivedAt === null)
-        .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)),
+        .sort((a, b) =>
+          a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : a.id < b.id ? -1 : 1,
+        ),
     [shells],
   );
 

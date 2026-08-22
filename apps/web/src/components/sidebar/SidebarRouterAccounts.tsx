@@ -12,7 +12,7 @@ import { memo, useCallback, useEffect, useState } from "react";
 import { cn } from "../../lib/utils";
 import { useActiveEnvironmentId } from "../../state/entities";
 import { routerPoolEnvironment } from "../../state/routerPool";
-import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { maskEmail } from "../settings/RouterPoolPanel";
 
 function pctTone(pct: number): string {
@@ -43,8 +43,9 @@ function WindowPct({
 export const SidebarRouterAccounts = memo(function SidebarRouterAccounts() {
   const environmentId = useActiveEnvironmentId();
   const navigate = useNavigate();
-  const fetchAccounts = useAtomQueryRunner(routerPoolEnvironment.accounts, {
+  const fetchAccounts = useAtomCommand(routerPoolEnvironment.accountsFetch, {
     reportFailure: false,
+    reportDefect: false,
   });
   const [rows, setRows] = useState<readonly RouterAccountRow[] | null>(null);
 

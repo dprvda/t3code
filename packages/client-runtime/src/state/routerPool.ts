@@ -25,6 +25,21 @@ export function createRouterPoolAtoms<R, E>(
       tag: WS_METHODS.claudeSeats,
       staleTimeMs: 30_000,
     }),
+    // Poll-friendly command variants: a fresh RPC on every call. The SWR
+    // query atoms above serve one-shot reads; polling THROUGH them via the
+    // query runner froze the meters (the runner's transient mount reads the
+    // cached success and closes its scope, cancelling the revalidation it
+    // just started) — the panel showed 38% while the account sat at 94%.
+    accountsFetch: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:router:accounts-fetch",
+      tag: WS_METHODS.routerAccounts,
+      scheduler,
+    }),
+    claudeSeatsFetch: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:router:claude-seats-fetch",
+      tag: WS_METHODS.claudeSeats,
+      scheduler,
+    }),
     toggleAccount: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:router:account-toggle",
       tag: WS_METHODS.routerAccountToggle,

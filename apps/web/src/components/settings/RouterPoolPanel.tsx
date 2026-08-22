@@ -188,8 +188,9 @@ const SEAT_STATE_STYLE: Record<ClaudeSeatRow["state"], { label: string; classNam
  * ready/cooling state. Hidden entirely when no rotation group is configured.
  */
 function ClaudeSeatsSection({ environmentId }: { readonly environmentId: EnvironmentId }) {
-  const fetchSeats = useAtomQueryRunner(routerPoolEnvironment.claudeSeats, {
+  const fetchSeats = useAtomCommand(routerPoolEnvironment.claudeSeatsFetch, {
     reportFailure: false,
+    reportDefect: false,
   });
   const [seats, setSeats] = useState<readonly ClaudeSeatRow[] | null>(null);
   const nowMs = useRelativeTimeTick(30_000);
@@ -288,8 +289,9 @@ function ClaudeSeatsSection({ environmentId }: { readonly environmentId: Environ
 
 export function RouterPoolPanel() {
   const environmentId = useActiveEnvironmentId();
-  const fetchAccounts = useAtomQueryRunner(routerPoolEnvironment.accounts, {
+  const fetchAccounts = useAtomCommand(routerPoolEnvironment.accountsFetch, {
     reportFailure: false,
+    reportDefect: false,
   });
   const toggleAccount = useAtomCommand(
     routerPoolEnvironment.toggleAccount,
