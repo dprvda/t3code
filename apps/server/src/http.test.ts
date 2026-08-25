@@ -8,6 +8,7 @@ import { describe } from "vite-plus/test";
 import {
   assetResponseHeaders,
   carbonArtifactResponseHeaders,
+  carbonUploadNameWithSuffix,
   isLoopbackHostname,
   listCarbonArtifacts,
   listCarbonSkills,
@@ -15,6 +16,7 @@ import {
   resolveCarbonArtifactFile,
   resolveCarbonCodexHome,
   resolveDevRedirectUrl,
+  sanitizeCarbonUploadName,
 } from "./http.ts";
 
 describe("http dev routing", () => {
@@ -72,6 +74,17 @@ describe("assetResponseHeaders", () => {
 });
 
 describe("carbon HTTP helpers", () => {
+  it("sanitizes upload names without losing their extension", () => {
+    expect(sanitizeCarbonUploadName("../../hero-film.mp4")).toBe("..-..-hero-film.mp4");
+    expect(sanitizeCarbonUploadName("mix\\final.wav")).toBe("mix-final.wav");
+    expect(sanitizeCarbonUploadName("..")).toBe("upload");
+  });
+
+  it("adds collision suffixes before an extension", () => {
+    expect(carbonUploadNameWithSuffix("hero-film.mp4", 2)).toBe("hero-film-2.mp4");
+    expect(carbonUploadNameWithSuffix("archive", 3)).toBe("archive-3");
+  });
+
   it.effect("lists valid skill cards and skips missing or malformed manifests", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

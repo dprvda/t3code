@@ -2,7 +2,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import type { ThreadId } from "@t3tools/contracts";
 import { Link } from "@tanstack/react-router";
-import { ArrowLeftIcon, FileIcon, SendIcon } from "lucide-react";
+import { ArrowLeftIcon, FileIcon, PaperclipIcon, SendIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "../../lib/utils";
@@ -16,6 +16,8 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Spinner } from "../ui/spinner";
 import { useStudioTurnSender, type StudioTurnTarget } from "./useStudioTurn";
+
+let uploadSequence = 0;
 
 interface StudioSkill {
   readonly id: string;
@@ -173,7 +175,13 @@ function StudioRoomBody({ project }: { readonly project: EnvironmentProject }) {
       </header>
       <div className="grid min-h-0 flex-1 grid-cols-[300px_minmax(0,1fr)_300px]">
         <SkillShelf onRun={send} workspaceRoot={project.workspaceRoot} />
-        <Conversation messages={messages} working={working} sendError={sendError} onSend={send} />
+        <Conversation
+          messages={messages}
+          working={working}
+          sendError={sendError}
+          workspaceRoot={project.workspaceRoot}
+          onSend={send}
+        />
         <ResultsPanel workspaceRoot={project.workspaceRoot} />
       </div>
     </div>
@@ -326,10 +334,17 @@ function SkillShelf({
   );
 }
 
+interface UploadStatus {
+  readonly id: string;
+  readonly name: string;
+  readonly state: "uploading" | "failed";
+}
+
 function Conversation({
   messages,
   working,
   sendError,
+  workspaceRoot,
   onSend,
 }: {
   readonly messages: ReadonlyArray<{
@@ -339,11 +354,15 @@ function Conversation({
   }>;
   readonly working: boolean;
   readonly sendError: string | null;
+  readonly workspaceRoot: string;
   readonly onSend: (text: string) => Promise<boolean>;
 }) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [uploads, setUploads] = useState<ReadonlyArray<UploadStatus>>([]);
+  const [dropActive, setDropActive] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const visibleMessages = useMemo(
     () =>
@@ -360,7 +379,7 @@ function Conversation({
     if (node !== null) {
       node.scrollTop = node.scrollHeight;
     }
-  }, [visibleMessages, working]);
+  }, [visibleMessages, working, uploads]);
 
   const submit = async () => {
     const text = draft.trim();
@@ -374,10 +393,65 @@ function Conversation({
     }
   };
 
+  const uploadFiles = async (files: FileList | ReadonlyArray<File>) => {
+    for (const file of Array.from(files)) {
+      const id = `upload-${++uploadSequence}`;
+      setUploads((existing) => [...existing, { id, name: file.name, state: "uploading" }]);
+      try {
+        const response = await fetch(
+          `/api/carbon/upload?workspaceRoot=${encodeURIComponent(workspaceRoot)}&name=${encodeURIComponent(file.name)}`,
+          { method: "POST", body: file },
+        );
+        if (!response.ok) throw new Error("upload failed");
+        const uploaded: unknown = await response.json();
+        if (
+          typeof uploaded !== "object" ||
+          uploaded === null ||
+          typeof (uploaded as { name?: unknown }).name !== "string" ||
+          typeof (uploaded as { path?: unknown }).path !== "string"
+        ) {
+          throw new Error("invalid upload response");
+        }
+        const { name, path } = uploaded as { readonly name: string; readonly path: string };
+        if (
+          !(await onSend(
+            `I've added the file ${name} — it's saved at ${path}. Use it for this project.`,
+          ))
+        ) {
+          throw new Error("message failed");
+        }
+        setUploads((existing) => existing.filter((upload) => upload.id !== id));
+      } catch {
+        setUploads((existing) =>
+          existing.map((upload) => (upload.id === id ? { ...upload, state: "failed" } : upload)),
+        );
+      }
+    }
+  };
+
   return (
-    <section className="flex min-h-0 flex-col">
+    <section
+      className={cn("relative flex min-h-0 flex-col", dropActive && "bg-accent/40")}
+      onDragOver={(event) => {
+        event.preventDefault();
+        setDropActive(true);
+      }}
+      onDragLeave={(event) => {
+        if (event.currentTarget === event.target) setDropActive(false);
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        setDropActive(false);
+        void uploadFiles(event.dataTransfer.files);
+      }}
+    >
+      {dropActive ? (
+        <div className="pointer-events-none absolute inset-x-0 top-4 z-10 text-center text-sm font-medium text-foreground">
+          Drop files to share them
+        </div>
+      ) : null}
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-        {visibleMessages.length === 0 && !working ? (
+        {visibleMessages.length === 0 && !working && uploads.length === 0 ? (
           <p className="mt-8 text-center text-sm text-muted-foreground">
             Say hello, or run something from the shelf on the left.
           </p>
@@ -396,6 +470,21 @@ function Conversation({
                 {message.text}
               </div>
             ))}
+            {uploads.map((upload) =>
+              upload.state === "uploading" ? (
+                <div
+                  key={upload.id}
+                  className="flex items-center gap-2 self-start px-1 text-sm text-muted-foreground"
+                >
+                  <Spinner className="size-3.5" />
+                  Uploading {upload.name}…
+                </div>
+              ) : (
+                <p key={upload.id} className="self-start px-1 text-sm text-destructive-foreground">
+                  Upload failed — try again.
+                </p>
+              ),
+            )}
             {working ? (
               <div className="flex items-center gap-2 self-start px-1 text-sm text-muted-foreground">
                 <Spinner className="size-3.5" />
@@ -418,6 +507,25 @@ function Conversation({
             void submit();
           }}
         >
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="sr-only"
+            multiple
+            onChange={(event) => {
+              if (event.target.files !== null) void uploadFiles(event.target.files);
+              event.target.value = "";
+            }}
+          />
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            aria-label="Attach files"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <PaperclipIcon className="size-4" />
+          </Button>
           <Input
             value={draft}
             onChange={(event) => setDraft(event.target.value)}

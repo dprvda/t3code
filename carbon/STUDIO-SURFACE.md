@@ -61,3 +61,11 @@ Rulings made while building, 2026-08-25. Spec source:
 
 Left as-is on purpose (no runtime collision): mobile app config, marketing
 site, AUR packaging, docs, deep UI copy mentioning T3 Code.
+
+## Uploads (built 2026-08-25)
+
+`POST /api/carbon/upload?workspaceRoot=<absolute>&name=<filename>` accepts raw file bytes and
+saves them in `<workspaceRoot>/uploads/`, returning the final absolute path, name, and byte size.
+The Studio room sends that path back as a turn message so the agent can use the file. The inherited
+image base64/WebSocket attachment pipeline remains untouched. TODO: replace the current buffered
+512 MB request-body write with a streamed write when larger uploads are needed.

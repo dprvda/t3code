@@ -17,6 +17,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { cast } from "effect/Function";
 import {
+  Headers,
   HttpBody,
   HttpClient,
   HttpClientResponse,
@@ -52,6 +53,7 @@ const CARBON_HTML_CONTENT_SECURITY_POLICY =
 const CARBON_SKILL_ICON_PATH_PREFIX = "/api/carbon/skills/";
 const CARBON_SKILL_ICON_PATH_SUFFIX = "/icon";
 const CARBON_SKILL_ID_PATTERN = /^[A-Za-z0-9-]+$/;
+const MAX_CARBON_UPLOAD_BYTES = 512 * 1024 * 1024;
 
 const CarbonSkillCardSchema = Schema.Struct({
   id: Schema.String,
@@ -100,6 +102,43 @@ export function parseCarbonSkillIconId(pathname: string): string | null {
   );
   return CARBON_SKILL_ID_PATTERN.test(id) ? id : null;
 }
+
+export function sanitizeCarbonUploadName(name: string): string {
+  const sanitized = name.replace(/[\\/\0]+/g, "-").trim();
+  return sanitized === "" || sanitized === "." || sanitized === ".." ? "upload" : sanitized;
+}
+
+export function carbonUploadNameWithSuffix(name: string, suffix: number): string {
+  if (suffix < 2) return name;
+  const extensionStart = name.lastIndexOf(".");
+  return extensionStart > 0
+    ? `${name.slice(0, extensionStart)}-${suffix}${name.slice(extensionStart)}`
+    : `${name}-${suffix}`;
+}
+
+const saveCarbonUpload = Effect.fn("http.saveCarbonUpload")(function* (
+  workspaceRoot: string,
+  name: string,
+  bytes: Uint8Array,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const uploadsRoot = path.join(workspaceRoot, "uploads");
+  const sanitizedName = sanitizeCarbonUploadName(name);
+  yield* fileSystem.makeDirectory(uploadsRoot, { recursive: true });
+
+  let suffix = 1;
+  let finalName = sanitizedName;
+  let filePath = path.join(uploadsRoot, finalName);
+  while (yield* fileSystem.exists(filePath)) {
+    suffix += 1;
+    finalName = carbonUploadNameWithSuffix(sanitizedName, suffix);
+    filePath = path.join(uploadsRoot, finalName);
+  }
+
+  yield* fileSystem.writeFile(filePath, bytes, { flag: "wx" });
+  return { path: filePath, name: finalName, sizeBytes: bytes.byteLength };
+});
 
 export const listCarbonSkills = Effect.fn("http.listCarbonSkills")(function* (codexHome: string) {
   const fileSystem = yield* FileSystem.FileSystem;
@@ -460,6 +499,56 @@ export const carbonRouteLayer = HttpRouter.add(
     }
 
     return HttpServerResponse.text("Not Found", { status: 404 });
+  }).pipe(
+    Effect.catchTags({
+      EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+      EnvironmentInternalError: HttpServerRespondable.toResponse,
+      EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+    }),
+  ),
+);
+
+export const carbonUploadRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/carbon/upload",
+  Effect.gen(function* () {
+    yield* authenticateRawRouteWithScope(AuthOrchestrationOperateScope);
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    if (Option.isNone(url)) {
+      return HttpServerResponse.text("Bad Request", { status: 400 });
+    }
+
+    const workspaceRoot = url.value.searchParams.get("workspaceRoot");
+    const name = url.value.searchParams.get("name");
+    const path = yield* Path.Path;
+    if (!workspaceRoot || !path.isAbsolute(workspaceRoot)) {
+      return HttpServerResponse.text("workspaceRoot must be an absolute path", { status: 400 });
+    }
+    if (!name) {
+      return HttpServerResponse.text("name is required", { status: 400 });
+    }
+
+    const contentLength = Option.getOrUndefined(Headers.get(request.headers, "content-length"));
+    const sizeBytes = Number(contentLength);
+    if (
+      contentLength === undefined ||
+      !Number.isSafeInteger(sizeBytes) ||
+      sizeBytes > MAX_CARBON_UPLOAD_BYTES
+    ) {
+      return HttpServerResponse.jsonUnsafe(
+        { error: "Upload must include a Content-Length no larger than 512 MB" },
+        { status: 413 },
+      );
+    }
+
+    const bytes = new Uint8Array(yield* request.arrayBuffer);
+    return yield* saveCarbonUpload(path.resolve(workspaceRoot), name, bytes).pipe(
+      Effect.map(HttpServerResponse.jsonUnsafe),
+      Effect.orElseSucceed(() =>
+        HttpServerResponse.jsonUnsafe({ error: "Upload failed" }, { status: 500 }),
+      ),
+    );
   }).pipe(
     Effect.catchTags({
       EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
