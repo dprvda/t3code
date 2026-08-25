@@ -1,3 +1,5 @@
+import * as NodeOS from "node:os";
+
 import Mime from "@effect/platform-node/Mime";
 import {
   AuthOrchestrationOperateScope,
@@ -12,6 +14,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import { cast } from "effect/Function";
 import {
   HttpBody,
@@ -44,6 +47,163 @@ const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 const DESKTOP_RENDERER_ORIGINS = ["carbonstudio://app", "carbonstudio-dev://app"];
 const SVG_CONTENT_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+const CARBON_HTML_CONTENT_SECURITY_POLICY =
+  "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox";
+const CARBON_SKILL_ICON_PATH_PREFIX = "/api/carbon/skills/";
+const CARBON_SKILL_ICON_PATH_SUFFIX = "/icon";
+const CARBON_SKILL_ID_PATTERN = /^[A-Za-z0-9-]+$/;
+
+const CarbonSkillCardSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  icon: Schema.String,
+  oneLiner: Schema.String,
+  youGiveMe: Schema.Array(Schema.String),
+  scripts: Schema.Array(Schema.String),
+  artifact: Schema.Struct({
+    template: Schema.String,
+    kind: Schema.Literals(["page", "document", "file"]),
+    output: Schema.String,
+  }),
+});
+
+export type CarbonSkill = typeof CarbonSkillCardSchema.Type & {
+  readonly skillPath: string;
+  readonly hasIcon: boolean;
+};
+
+export interface CarbonArtifact {
+  readonly name: string;
+  readonly path: string;
+  readonly modifiedAt: string;
+}
+
+export function resolveCarbonCodexHome(
+  path: Path.Path,
+  override: string | undefined = process.env.CARBON_CODEX_HOME,
+  homeDir: string = NodeOS.homedir(),
+): string {
+  const configuredHome = override?.trim();
+  return path.resolve(configuredHome || path.join(homeDir, ".carbon-studio", "codex-home"));
+}
+
+export function parseCarbonSkillIconId(pathname: string): string | null {
+  if (
+    !pathname.startsWith(CARBON_SKILL_ICON_PATH_PREFIX) ||
+    !pathname.endsWith(CARBON_SKILL_ICON_PATH_SUFFIX)
+  ) {
+    return null;
+  }
+  const id = pathname.slice(
+    CARBON_SKILL_ICON_PATH_PREFIX.length,
+    -CARBON_SKILL_ICON_PATH_SUFFIX.length,
+  );
+  return CARBON_SKILL_ID_PATTERN.test(id) ? id : null;
+}
+
+export const listCarbonSkills = Effect.fn("http.listCarbonSkills")(function* (codexHome: string) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const skillsRoot = path.join(codexHome, "skills");
+  const skillFolders = yield* fileSystem
+    .readDirectory(skillsRoot)
+    .pipe(Effect.orElseSucceed(() => []));
+  const decodeCard = Schema.decodeUnknownEffect(Schema.fromJsonString(CarbonSkillCardSchema));
+  const skills: Array<CarbonSkill> = [];
+
+  for (const skillFolder of skillFolders.sort()) {
+    const skillPath = path.resolve(skillsRoot, skillFolder);
+    const cardPath = path.join(skillPath, "card.json");
+    if (!(yield* fileSystem.exists(cardPath).pipe(Effect.orElseSucceed(() => false)))) {
+      continue;
+    }
+
+    const cardJson = yield* fileSystem.readFileString(cardPath).pipe(
+      Effect.tapError((cause) =>
+        Effect.logWarning("Skipping unreadable Carbon skill manifest.", { cardPath, cause }),
+      ),
+      Effect.option,
+    );
+    if (Option.isNone(cardJson)) continue;
+
+    const card = yield* decodeCard(cardJson.value).pipe(
+      Effect.tapError((cause) =>
+        Effect.logWarning("Skipping malformed Carbon skill manifest.", { cardPath, cause }),
+      ),
+      Effect.option,
+    );
+    if (Option.isNone(card)) continue;
+
+    const iconInfo = yield* fileSystem.stat(path.join(skillPath, "icon.png")).pipe(Effect.option);
+    skills.push({
+      ...card.value,
+      skillPath,
+      hasIcon: Option.isSome(iconInfo) && iconInfo.value.type === "File",
+    });
+  }
+
+  return skills;
+});
+
+export const listCarbonArtifacts = Effect.fn("http.listCarbonArtifacts")(function* (
+  workspaceRoot: string,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const artifactsRoot = path.join(workspaceRoot, "artifacts");
+  const names = yield* fileSystem.readDirectory(artifactsRoot).pipe(Effect.orElseSucceed(() => []));
+  const artifacts: Array<CarbonArtifact> = [];
+
+  for (const name of names.sort()) {
+    const filePath = path.resolve(artifactsRoot, name);
+    const info = yield* fileSystem.stat(filePath).pipe(Effect.option);
+    if (Option.isNone(info) || info.value.type !== "File" || Option.isNone(info.value.mtime)) {
+      continue;
+    }
+    artifacts.push({
+      name,
+      path: filePath,
+      modifiedAt: info.value.mtime.value.toISOString(),
+    });
+  }
+
+  return artifacts;
+});
+
+function hasCarbonArtifactsSegment(path: Path.Path, filePath: string): boolean {
+  return filePath.includes(`${path.sep}artifacts${path.sep}`);
+}
+
+export const resolveCarbonArtifactFile = Effect.fn("http.resolveCarbonArtifactFile")(function* (
+  requestedPath: string,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  if (!path.isAbsolute(requestedPath) || requestedPath.includes("\0")) return null;
+
+  const lexicalPath = path.resolve(requestedPath);
+  if (!hasCarbonArtifactsSegment(path, lexicalPath)) return null;
+
+  const canonicalPath = yield* fileSystem.realPath(lexicalPath).pipe(Effect.option);
+  if (Option.isNone(canonicalPath) || !hasCarbonArtifactsSegment(path, canonicalPath.value)) {
+    return null;
+  }
+
+  const info = yield* fileSystem.stat(canonicalPath.value).pipe(Effect.option);
+  return Option.isSome(info) && info.value.type === "File" ? canonicalPath.value : null;
+});
+
+export function carbonArtifactResponseHeaders(filePath: string): Record<string, string> {
+  const lowerPath = filePath.toLowerCase();
+  const isHtml = lowerPath.endsWith(".html") || lowerPath.endsWith(".htm");
+  return {
+    "Content-Type": isHtml
+      ? "text/html; charset=utf-8"
+      : (Mime.getType(filePath) ?? "application/octet-stream"),
+    "X-Content-Type-Options": "nosniff",
+    ...(isHtml ? { "Content-Security-Policy": CARBON_HTML_CONTENT_SECURITY_POLICY } : {}),
+  };
+}
 
 export function assetResponseHeaders(filePath: string): Record<string, string> {
   const lowerPath = filePath.toLowerCase();
@@ -228,6 +388,85 @@ export const assetRouteLayer = HttpRouter.add(
       Effect.orElseSucceed(() => HttpServerResponse.text("Internal Server Error", { status: 500 })),
     );
   }),
+);
+
+export const carbonRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/carbon/*",
+  Effect.gen(function* () {
+    yield* authenticateRawRouteWithScope(AuthOrchestrationReadScope);
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    if (Option.isNone(url)) {
+      return HttpServerResponse.text("Bad Request", { status: 400 });
+    }
+
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const pathname = url.value.pathname;
+
+    if (pathname === "/api/carbon/skills") {
+      const codexHome = resolveCarbonCodexHome(path);
+      return HttpServerResponse.jsonUnsafe({ skills: yield* listCarbonSkills(codexHome) });
+    }
+
+    const skillId = parseCarbonSkillIconId(pathname);
+    if (skillId !== null) {
+      const iconPath = path.join(resolveCarbonCodexHome(path), "skills", skillId, "icon.png");
+      const iconInfo = yield* fileSystem.stat(iconPath).pipe(Effect.option);
+      if (Option.isNone(iconInfo) || iconInfo.value.type !== "File") {
+        return HttpServerResponse.text("Not Found", { status: 404 });
+      }
+      return yield* HttpServerResponse.file(iconPath, {
+        status: 200,
+        headers: {
+          "Content-Type": "image/png",
+          "X-Content-Type-Options": "nosniff",
+        },
+      }).pipe(
+        Effect.orElseSucceed(() =>
+          HttpServerResponse.text("Internal Server Error", { status: 500 }),
+        ),
+      );
+    }
+
+    if (pathname === "/api/carbon/artifacts") {
+      const workspaceRoot = url.value.searchParams.get("workspaceRoot");
+      if (!workspaceRoot || !path.isAbsolute(workspaceRoot)) {
+        return HttpServerResponse.text("workspaceRoot must be an absolute path", { status: 400 });
+      }
+      return HttpServerResponse.jsonUnsafe({
+        artifacts: yield* listCarbonArtifacts(path.resolve(workspaceRoot)),
+      });
+    }
+
+    if (pathname === "/api/carbon/artifacts/file") {
+      const requestedPath = url.value.searchParams.get("path");
+      if (!requestedPath || !path.isAbsolute(requestedPath)) {
+        return HttpServerResponse.text("path must be an absolute path", { status: 400 });
+      }
+      const artifactPath = yield* resolveCarbonArtifactFile(requestedPath);
+      if (!artifactPath) {
+        return HttpServerResponse.text("Not Found", { status: 404 });
+      }
+      return yield* HttpServerResponse.file(artifactPath, {
+        status: 200,
+        headers: carbonArtifactResponseHeaders(artifactPath),
+      }).pipe(
+        Effect.orElseSucceed(() =>
+          HttpServerResponse.text("Internal Server Error", { status: 500 }),
+        ),
+      );
+    }
+
+    return HttpServerResponse.text("Not Found", { status: 404 });
+  }).pipe(
+    Effect.catchTags({
+      EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+      EnvironmentInternalError: HttpServerRespondable.toResponse,
+      EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+    }),
+  ),
 );
 
 export const staticAndDevRouteLayer = HttpRouter.add(

@@ -14,6 +14,7 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as PairRouteImport } from './routes/pair'
 import { Route as ConnectRouteImport } from './routes/connect'
 import { Route as ChatRouteImport } from './routes/_chat'
+import { Route as StudioIndexRouteImport } from './routes/studio.index'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as SettingsSourceControlRouteImport } from './routes/settings.source-control'
 import { Route as SettingsRouterPoolRouteImport } from './routes/settings.router-pool'
@@ -29,6 +30,7 @@ import { Route as ProjectsProjectKeyRouteImport } from './routes/projects.$proje
 import { Route as ConnectCallbackRouteImport } from './routes/connect_.callback'
 import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
 import { Route as ChatGridRouteImport } from './routes/_chat.grid'
+import { Route as StudioPProjectIdRouteImport } from './routes/studio.p.$projectId'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
 
@@ -54,6 +56,11 @@ const ConnectRoute = ConnectRouteImport.update({
 } as any)
 const ChatRoute = ChatRouteImport.update({
   id: '/_chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StudioIndexRoute = StudioIndexRouteImport.update({
+  id: '/studio/',
+  path: '/studio/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ChatIndexRoute = ChatIndexRouteImport.update({
@@ -131,6 +138,11 @@ const ChatGridRoute = ChatGridRouteImport.update({
   path: '/grid',
   getParentRoute: () => ChatRoute,
 } as any)
+const StudioPProjectIdRoute = StudioPProjectIdRouteImport.update({
+  id: '/studio/p/$projectId',
+  path: '/studio/p/$projectId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ChatDraftDraftIdRoute = ChatDraftDraftIdRouteImport.update({
   id: '/draft/$draftId',
   path: '/draft/$draftId',
@@ -163,8 +175,10 @@ export interface FileRoutesByFullPath {
   '/settings/providers': typeof SettingsProvidersRoute
   '/settings/router-pool': typeof SettingsRouterPoolRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
+  '/studio/': typeof StudioIndexRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/studio/p/$projectId': typeof StudioPProjectIdRoute
 }
 export interface FileRoutesByTo {
   '/connect': typeof ConnectRoute
@@ -186,8 +200,10 @@ export interface FileRoutesByTo {
   '/settings/router-pool': typeof SettingsRouterPoolRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/': typeof ChatIndexRoute
+  '/studio': typeof StudioIndexRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/studio/p/$projectId': typeof StudioPProjectIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -211,8 +227,10 @@ export interface FileRoutesById {
   '/settings/router-pool': typeof SettingsRouterPoolRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/_chat/': typeof ChatIndexRoute
+  '/studio/': typeof StudioIndexRoute
   '/_chat/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/_chat/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/studio/p/$projectId': typeof StudioPProjectIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -236,8 +254,10 @@ export interface FileRouteTypes {
     | '/settings/providers'
     | '/settings/router-pool'
     | '/settings/source-control'
+    | '/studio/'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
+    | '/studio/p/$projectId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/connect'
@@ -259,8 +279,10 @@ export interface FileRouteTypes {
     | '/settings/router-pool'
     | '/settings/source-control'
     | '/'
+    | '/studio'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
+    | '/studio/p/$projectId'
   id:
     | '__root__'
     | '/_chat'
@@ -283,8 +305,10 @@ export interface FileRouteTypes {
     | '/settings/router-pool'
     | '/settings/source-control'
     | '/_chat/'
+    | '/studio/'
     | '/_chat/$environmentId/$threadId'
     | '/_chat/draft/$draftId'
+    | '/studio/p/$projectId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -295,6 +319,8 @@ export interface RootRouteChildren {
   UsageRoute: typeof UsageRoute
   ConnectCallbackRoute: typeof ConnectCallbackRoute
   ProjectsProjectKeyRoute: typeof ProjectsProjectKeyRoute
+  StudioIndexRoute: typeof StudioIndexRoute
+  StudioPProjectIdRoute: typeof StudioPProjectIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -332,6 +358,13 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof ChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/studio/': {
+      id: '/studio/'
+      path: '/studio'
+      fullPath: '/studio/'
+      preLoaderRoute: typeof StudioIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_chat/': {
@@ -439,6 +472,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatGridRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/studio/p/$projectId': {
+      id: '/studio/p/$projectId'
+      path: '/studio/p/$projectId'
+      fullPath: '/studio/p/$projectId'
+      preLoaderRoute: typeof StudioPProjectIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_chat/draft/$draftId': {
       id: '/_chat/draft/$draftId'
       path: '/draft/$draftId'
@@ -512,6 +552,8 @@ const rootRouteChildren: RootRouteChildren = {
   UsageRoute: UsageRoute,
   ConnectCallbackRoute: ConnectCallbackRoute,
   ProjectsProjectKeyRoute: ProjectsProjectKeyRoute,
+  StudioIndexRoute: StudioIndexRoute,
+  StudioPProjectIdRoute: StudioPProjectIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

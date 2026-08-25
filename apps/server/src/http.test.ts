@@ -1,7 +1,21 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import { describe } from "vite-plus/test";
 
-import { assetResponseHeaders, isLoopbackHostname, resolveDevRedirectUrl } from "./http.ts";
+import {
+  assetResponseHeaders,
+  carbonArtifactResponseHeaders,
+  isLoopbackHostname,
+  listCarbonArtifacts,
+  listCarbonSkills,
+  parseCarbonSkillIconId,
+  resolveCarbonArtifactFile,
+  resolveCarbonCodexHome,
+  resolveDevRedirectUrl,
+} from "./http.ts";
 
 describe("http dev routing", () => {
   it("treats localhost and loopback addresses as local", () => {
@@ -54,5 +68,143 @@ describe("assetResponseHeaders", () => {
       "Content-Type",
       "text/html; charset=utf-8",
     );
+  });
+});
+
+describe("carbon HTTP helpers", () => {
+  it.effect("lists valid skill cards and skips missing or malformed manifests", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const codexHome = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "carbon-http-skills-",
+      });
+      const validSkillPath = path.join(codexHome, "skills", "valid-skill");
+      const malformedSkillPath = path.join(codexHome, "skills", "malformed-skill");
+      const missingCardPath = path.join(codexHome, "skills", "missing-card");
+      yield* fileSystem.makeDirectory(validSkillPath, { recursive: true });
+      yield* fileSystem.makeDirectory(malformedSkillPath, { recursive: true });
+      yield* fileSystem.makeDirectory(missingCardPath, { recursive: true });
+      yield* fileSystem.writeFileString(
+        path.join(validSkillPath, "card.json"),
+        `{
+          "id": "valid-skill",
+          "name": "Valid skill",
+          "icon": "icon.png",
+          "oneLiner": "Does a useful thing.",
+          "youGiveMe": ["Input"],
+          "scripts": ["scripts/run.ts"],
+          "artifact": {
+            "template": "templates/output.html",
+            "kind": "page",
+            "output": "artifacts/output.html"
+          }
+        }`,
+      );
+      yield* fileSystem.writeFileString(path.join(validSkillPath, "icon.png"), "png");
+      yield* fileSystem.writeFileString(path.join(malformedSkillPath, "card.json"), "{");
+
+      expect(yield* listCarbonSkills(codexHome)).toEqual([
+        {
+          id: "valid-skill",
+          name: "Valid skill",
+          icon: "icon.png",
+          oneLiner: "Does a useful thing.",
+          youGiveMe: ["Input"],
+          scripts: ["scripts/run.ts"],
+          artifact: {
+            template: "templates/output.html",
+            kind: "page",
+            output: "artifacts/output.html",
+          },
+          skillPath: validSkillPath,
+          hasIcon: true,
+        },
+      ]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("lists non-recursive workspace artifacts with modification timestamps", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "carbon-http-artifacts-",
+      });
+      const artifactsRoot = path.join(workspaceRoot, "artifacts");
+      const artifactPath = path.join(artifactsRoot, "check-page.html");
+      yield* fileSystem.makeDirectory(path.join(artifactsRoot, "nested"), { recursive: true });
+      yield* fileSystem.writeFileString(artifactPath, "<h1>Check page</h1>");
+
+      const artifacts = yield* listCarbonArtifacts(workspaceRoot);
+      expect(artifacts).toHaveLength(1);
+      expect(artifacts[0]).toMatchObject({
+        name: "check-page.html",
+        path: artifactPath,
+      });
+      expect(Number.isNaN(Date.parse(artifacts[0]!.modifiedAt))).toBe(false);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects traversal and symlink escapes from artifact file paths", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "carbon-http-workspace-",
+      });
+      const outsideRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "carbon-http-outside-",
+      });
+      const artifactsRoot = path.join(workspaceRoot, "artifacts");
+      const artifactPath = path.join(artifactsRoot, "inside.html");
+      const outsidePath = path.join(outsideRoot, "outside.html");
+      const linkedPath = path.join(artifactsRoot, "linked.html");
+      yield* fileSystem.makeDirectory(artifactsRoot, { recursive: true });
+      yield* fileSystem.writeFileString(artifactPath, "inside");
+      yield* fileSystem.writeFileString(outsidePath, "outside");
+      yield* fileSystem.symlink(outsidePath, linkedPath);
+
+      expect(yield* resolveCarbonArtifactFile(artifactPath)).toBe(
+        yield* fileSystem.realPath(artifactPath),
+      );
+      expect(
+        yield* resolveCarbonArtifactFile(path.join(artifactsRoot, "..", "outside.html")),
+      ).toBeNull();
+      expect(yield* resolveCarbonArtifactFile(linkedPath)).toBeNull();
+      expect(yield* resolveCarbonArtifactFile("relative/artifacts/file.html")).toBeNull();
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it("validates icon route ids", () => {
+    expect(parseCarbonSkillIconId("/api/carbon/skills/check-page-demo/icon")).toBe(
+      "check-page-demo",
+    );
+    expect(parseCarbonSkillIconId("/api/carbon/skills/../icon")).toBeNull();
+  });
+
+  it.effect("uses the configured codex home or the Carbon Studio default", () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      expect(resolveCarbonCodexHome(path, "/tmp/custom-codex", "/home/test")).toBe(
+        "/tmp/custom-codex",
+      );
+      expect(resolveCarbonCodexHome(path, undefined, "/home/test")).toBe(
+        "/home/test/.carbon-studio/codex-home",
+      );
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it("sets restrictive HTML headers and correct raster image types", () => {
+    expect(carbonArtifactResponseHeaders("/workspace/artifacts/page.html")).toEqual({
+      "Content-Type": "text/html; charset=utf-8",
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy":
+        "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox",
+    });
+    expect(carbonArtifactResponseHeaders("/workspace/artifacts/image.png")).toEqual({
+      "Content-Type": "image/png",
+      "X-Content-Type-Options": "nosniff",
+    });
   });
 });
