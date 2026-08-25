@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Check page — {{VERSION}}</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      body {
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        max-width: 720px;
+        margin: 3rem auto;
+        padding: 0 1rem;
+      }
+      h1 {
+        font-size: 1.4rem;
+      }
+      .summary {
+        color: #666;
+        margin-bottom: 2rem;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      td {
+        border-top: 1px solid #ddd;
+        padding: 0.6rem 0.5rem;
+        vertical-align: top;
+      }
+      td:first-child {
+        color: #999;
+        width: 2rem;
+      }
+      .badge {
+        font-size: 0.75rem;
+        padding: 0.15rem 0.5rem;
+        border-radius: 999px;
+        white-space: nowrap;
+      }
+      .badge.correction {
+        background: #fde8e8;
+        color: #b42318;
+      }
+      .badge.question {
+        background: #e8f0fd;
+        color: #1849b4;
+      }
+      @media (prefers-color-scheme: dark) {
+        .summary {
+          color: #aaa;
+        }
+        td {
+          border-top-color: #333;
+        }
+        .badge.correction {
+          background: #3a1c1c;
+          color: #f5a9a0;
+        }
+        .badge.question {
+          background: #1c263a;
+          color: #a0c0f5;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Check page — {{VERSION}}</h1>
+    <p class="summary">
+      {{COUNT}} items this round — {{CORRECTIONS}} corrections, {{QUESTIONS}} read as questions.
+    </p>
+    <table>
+      <tbody>
+        {{ROWS}}
+      </tbody>
+    </table>
+  </body>
+</html>

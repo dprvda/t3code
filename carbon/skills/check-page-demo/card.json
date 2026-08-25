@@ -1,0 +1,16 @@
+{
+  "id": "check-page-demo",
+  "name": "Build the check page",
+  "icon": "icon.png",
+  "oneLiner": "Turns a round of client comments into a check page.",
+  "youGiveMe": [
+    "The client comments (paste them here)",
+    "Which version we are checking (v3, v4, ...)"
+  ],
+  "scripts": ["scripts/make_check_page.py"],
+  "artifact": {
+    "template": "templates/check-page.html",
+    "kind": "page",
+    "output": "artifacts/check-page.html"
+  }
+}
