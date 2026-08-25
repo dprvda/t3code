@@ -92,8 +92,8 @@ it.effect("derives direct Clerk OAuth endpoints from statically injected public 
     assert.deepEqual(config, {
       tokenEndpoint: "https://clerk.example.test/oauth/token",
       clientId: "oauth_client_embedded",
-      loopbackPort: 34338,
-      redirectUri: "http://127.0.0.1:34338/callback",
+      loopbackPort: 34339,
+      redirectUri: "http://127.0.0.1:34339/callback",
       scopes: ["openid", "profile", "email"],
     });
   }),
