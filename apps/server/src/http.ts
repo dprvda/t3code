@@ -209,6 +209,65 @@ export const listCarbonArtifacts = Effect.fn("http.listCarbonArtifacts")(functio
   return artifacts;
 });
 
+export interface CarbonUpload {
+  readonly name: string;
+  readonly path: string;
+  readonly sizeBytes: number;
+  readonly modifiedAt: string;
+}
+
+export const listCarbonUploads = Effect.fn("http.listCarbonUploads")(function* (
+  workspaceRoot: string,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const uploadsRoot = path.join(workspaceRoot, "uploads");
+  const names = yield* fileSystem.readDirectory(uploadsRoot).pipe(Effect.orElseSucceed(() => []));
+  const uploads: Array<CarbonUpload> = [];
+
+  for (const name of names.sort()) {
+    const filePath = path.resolve(uploadsRoot, name);
+    const info = yield* fileSystem.stat(filePath).pipe(Effect.option);
+    if (Option.isNone(info) || info.value.type !== "File" || Option.isNone(info.value.mtime)) {
+      continue;
+    }
+    uploads.push({
+      name,
+      path: filePath,
+      sizeBytes: Number(info.value.size),
+      modifiedAt: info.value.mtime.value.toISOString(),
+    });
+  }
+
+  return uploads;
+});
+
+export interface CarbonWorkspaceEntry {
+  readonly name: string;
+  readonly kind: "folder" | "file";
+}
+
+export const listCarbonWorkspaceEntries = Effect.fn("http.listCarbonWorkspaceEntries")(function* (
+  workspaceRoot: string,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const names = yield* fileSystem.readDirectory(workspaceRoot).pipe(Effect.orElseSucceed(() => []));
+  const entries: Array<CarbonWorkspaceEntry> = [];
+
+  for (const name of names.sort()) {
+    if (name.startsWith(".")) continue;
+    const info = yield* fileSystem.stat(path.resolve(workspaceRoot, name)).pipe(Effect.option);
+    if (Option.isNone(info)) continue;
+    if (info.value.type === "Directory") entries.push({ name, kind: "folder" });
+    else if (info.value.type === "File") entries.push({ name, kind: "file" });
+  }
+
+  return entries.sort((a, b) =>
+    a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "folder" ? -1 : 1,
+  );
+});
+
 function hasCarbonArtifactsSegment(path: Path.Path, filePath: string): boolean {
   return filePath.includes(`${path.sep}artifacts${path.sep}`);
 }
@@ -476,6 +535,26 @@ export const carbonRouteLayer = HttpRouter.add(
       }
       return HttpServerResponse.jsonUnsafe({
         artifacts: yield* listCarbonArtifacts(path.resolve(workspaceRoot)),
+      });
+    }
+
+    if (pathname === "/api/carbon/uploads") {
+      const workspaceRoot = url.value.searchParams.get("workspaceRoot");
+      if (!workspaceRoot || !path.isAbsolute(workspaceRoot)) {
+        return HttpServerResponse.text("workspaceRoot must be an absolute path", { status: 400 });
+      }
+      return HttpServerResponse.jsonUnsafe({
+        uploads: yield* listCarbonUploads(path.resolve(workspaceRoot)),
+      });
+    }
+
+    if (pathname === "/api/carbon/workspace") {
+      const workspaceRoot = url.value.searchParams.get("workspaceRoot");
+      if (!workspaceRoot || !path.isAbsolute(workspaceRoot)) {
+        return HttpServerResponse.text("workspaceRoot must be an absolute path", { status: 400 });
+      }
+      return HttpServerResponse.jsonUnsafe({
+        entries: yield* listCarbonWorkspaceEntries(path.resolve(workspaceRoot)),
       });
     }
 

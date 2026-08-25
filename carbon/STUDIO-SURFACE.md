@@ -69,3 +69,15 @@ saves them in `<workspaceRoot>/uploads/`, returning the final absolute path, nam
 The Studio room sends that path back as a turn message so the agent can use the file. The inherited
 image base64/WebSocket attachment pipeline remains untouched. TODO: replace the current buffered
 512 MB request-body write with a streamed write when larger uploads are needed.
+
+## Workspace visibility endpoints (added 2026-08-25, owner UI feedback round)
+
+Owner direction: not maximal minimalism — a PM workspace with proper access to
+skills and more visibility. The room became three canvases (skills library /
+conversation / right rail with Overview + Files + Results). Two more read-only
+listings joined the carbon routes in `apps/server/src/http.ts`, mirroring the
+artifacts listing:
+
+- `GET /api/carbon/uploads?workspaceRoot=<abs>` — files in `<root>/uploads/`.
+- `GET /api/carbon/workspace?workspaceRoot=<abs>` — top-level workspace entries
+  (the 01_brief…05_delivery glance in the Overview panel).

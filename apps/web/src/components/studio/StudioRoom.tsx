@@ -1,9 +1,31 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import type { ThreadId } from "@t3tools/contracts";
+import type { OrchestrationMessage, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import { Link } from "@tanstack/react-router";
-import { ArrowLeftIcon, FileIcon, PaperclipIcon, SendIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowLeftIcon,
+  AppWindowIcon,
+  CalendarIcon,
+  FileIcon,
+  FileTextIcon,
+  FolderIcon,
+  ImageIcon,
+  LinkIcon,
+  PackageOpenIcon,
+  SparklesIcon,
+  UploadCloudIcon,
+  WandSparklesIcon,
+  XIcon,
+} from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from "react";
 
 import { cn } from "../../lib/utils";
 import {
@@ -12,12 +34,17 @@ import {
   useThreadMessages,
   useThreadShells,
 } from "../../state/entities";
+import { formatRelativeTimeLabel } from "../../timestampFormat";
+import ChatMarkdown from "../ChatMarkdown";
+import { ProjectFavicon } from "../ProjectFavicon";
 import { Button } from "../ui/button";
+import { Card } from "../ui/card";
+import { Field, FieldLabel } from "../ui/field";
 import { Input } from "../ui/input";
+import { ScrollArea } from "../ui/scroll-area";
 import { Spinner } from "../ui/spinner";
+import { HideWorkspaceChrome } from "./StudioSurface";
 import { useStudioTurnSender, type StudioTurnTarget } from "./useStudioTurn";
-
-let uploadSequence = 0;
 
 interface StudioSkill {
   readonly id: string;
@@ -26,12 +53,25 @@ interface StudioSkill {
   readonly youGiveMe: ReadonlyArray<string>;
   readonly hasIcon: boolean;
   readonly skillPath: string;
-  readonly artifact: string;
 }
 
-interface StudioArtifact {
+interface StudioFileEntry {
   readonly path: string;
   readonly name: string;
+  readonly sizeBytes: number | null;
+  readonly modifiedAt: string | null;
+}
+
+interface StudioWorkspaceEntry {
+  readonly name: string;
+  readonly kind: "folder" | "file";
+}
+
+interface ProjectVitals {
+  readonly client: string | null;
+  readonly what: string | null;
+  readonly links: ReadonlyArray<string>;
+  readonly deadline: string | null;
 }
 
 function parseSkills(payload: unknown): ReadonlyArray<StudioSkill> {
@@ -52,33 +92,154 @@ function parseSkills(payload: unknown): ReadonlyArray<StudioSkill> {
           : [],
         hasIcon: skill.hasIcon === true,
         skillPath: typeof skill.skillPath === "string" ? skill.skillPath : "",
-        artifact: typeof skill.artifact === "string" ? skill.artifact : "",
       },
     ];
   });
 }
 
-function parseArtifacts(payload: unknown): ReadonlyArray<StudioArtifact> {
+function parseFileEntries(
+  payload: unknown,
+  key: "artifacts" | "uploads",
+): ReadonlyArray<StudioFileEntry> {
   if (typeof payload !== "object" || payload === null) return [];
-  const artifacts = (payload as { artifacts?: unknown }).artifacts;
-  if (!Array.isArray(artifacts)) return [];
-  return artifacts.flatMap((entry) => {
-    if (typeof entry === "string") {
-      return [{ path: entry, name: entry.split("/").at(-1) ?? entry }];
-    }
+  const list = (payload as Record<string, unknown>)[key];
+  if (!Array.isArray(list)) return [];
+  return list.flatMap((entry) => {
     if (typeof entry !== "object" || entry === null) return [];
-    const artifact = entry as Record<string, unknown>;
-    if (typeof artifact.path !== "string") return [];
+    const file = entry as Record<string, unknown>;
+    if (typeof file.path !== "string") return [];
     return [
       {
-        path: artifact.path,
+        path: file.path,
         name:
-          typeof artifact.name === "string"
-            ? artifact.name
-            : (artifact.path.split("/").at(-1) ?? artifact.path),
+          typeof file.name === "string" ? file.name : (file.path.split("/").at(-1) ?? file.path),
+        sizeBytes: typeof file.sizeBytes === "number" ? file.sizeBytes : null,
+        modifiedAt: typeof file.modifiedAt === "string" ? file.modifiedAt : null,
       },
     ];
   });
+}
+
+function parseWorkspaceEntries(payload: unknown): ReadonlyArray<StudioWorkspaceEntry> {
+  if (typeof payload !== "object" || payload === null) return [];
+  const entries = (payload as { entries?: unknown }).entries;
+  if (!Array.isArray(entries)) return [];
+  return entries.flatMap((entry) => {
+    if (typeof entry !== "object" || entry === null) return [];
+    const item = entry as Record<string, unknown>;
+    if (typeof item.name !== "string") return [];
+    return [{ name: item.name, kind: item.kind === "folder" ? "folder" : "file" } as const];
+  });
+}
+
+/** The wizard writes the intake as the first message; read the vitals back out of it. */
+function parseVitals(messages: ReadonlyArray<OrchestrationMessage>): ProjectVitals | null {
+  const intake = messages.find(
+    (message) => message.role === "user" && message.text.startsWith("New project for "),
+  );
+  if (intake === undefined) return null;
+  const text = intake.text.replaceAll("\n", " ");
+  const client = /^New project for (.+?):/.exec(text)?.[1]?.trim() ?? null;
+  const deadline = /Deadline:\s*(.+?)\.?\s*$/.exec(text)?.[1]?.trim() ?? null;
+  const linksSegment = /Links:\s*(.+?)(?=\s*Deadline:|\s*$)/.exec(text)?.[1] ?? "";
+  const links = [...linksSegment.matchAll(/https?:\/\/\S+/g)].map((match) =>
+    match[0].replace(/[.,]+$/, ""),
+  );
+  let what: string | null = null;
+  const colonIndex = text.indexOf(":");
+  if (client !== null && colonIndex !== -1) {
+    what =
+      text
+        .slice(colonIndex + 1)
+        .split(/\s+Links:|\s+Deadline:/)[0]
+        ?.trim()
+        .replace(/\.$/, "") ?? null;
+  }
+  return { client, what, links, deadline };
+}
+
+function usePolledJson<T>(
+  url: string,
+  parse: (payload: unknown) => T,
+  intervalMs: number,
+): T | null {
+  const [data, setData] = useState<T | null>(null);
+  const parseRef = useRef(parse);
+  parseRef.current = parse;
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await fetch(url);
+        if (!response.ok) return;
+        const parsed = parseRef.current(await response.json());
+        if (!cancelled) setData(parsed);
+      } catch {
+        // Endpoint unreachable — keep the last known state.
+      }
+    };
+    void load();
+    const timer = setInterval(() => void load(), intervalMs);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [url, intervalMs]);
+
+  return data;
+}
+
+const FILE_ICON_BY_EXTENSION: Record<string, ComponentType<{ className?: string }>> = {
+  html: AppWindowIcon,
+  htm: AppWindowIcon,
+  md: FileTextIcon,
+  txt: FileTextIcon,
+  pdf: FileTextIcon,
+  png: ImageIcon,
+  jpg: ImageIcon,
+  jpeg: ImageIcon,
+  gif: ImageIcon,
+  webp: ImageIcon,
+  svg: ImageIcon,
+  mov: ImageIcon,
+  mp4: ImageIcon,
+};
+
+function fileExtension(path: string): string {
+  return path.split(".").at(-1)?.toLowerCase() ?? "";
+}
+
+function fileIconFor(path: string): ComponentType<{ className?: string }> {
+  return FILE_ICON_BY_EXTENSION[fileExtension(path)] ?? FileIcon;
+}
+
+function artifactFileUrl(path: string): string {
+  return `/api/carbon/artifacts/file?path=${encodeURIComponent(path)}`;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+const MONOGRAM_GRADIENTS = [
+  "from-sky-500/85 to-indigo-500/85",
+  "from-emerald-500/85 to-teal-500/85",
+  "from-amber-500/85 to-orange-500/85",
+  "from-rose-500/85 to-pink-500/85",
+  "from-violet-500/85 to-purple-500/85",
+  "from-cyan-500/85 to-blue-500/85",
+];
+
+function monogramGradient(id: string): string {
+  let hash = 0;
+  for (let index = 0; index < id.length; index += 1) {
+    hash = (hash * 31 + id.charCodeAt(index)) | 0;
+  }
+  return MONOGRAM_GRADIENTS[Math.abs(hash) % MONOGRAM_GRADIENTS.length]!;
 }
 
 export function StudioRoom({ projectId }: { readonly projectId: string }) {
@@ -88,13 +249,15 @@ export function StudioRoom({ projectId }: { readonly projectId: string }) {
 
   if (project === null) {
     return (
-      <div className="fixed inset-0 z-40 flex flex-col items-center justify-center gap-4 bg-background text-foreground">
+      <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-background text-foreground">
+        <HideWorkspaceChrome />
         {bootstrapped ? (
           <>
             <p className="text-sm text-muted-foreground">We couldn't find this project.</p>
-            <Link to="/studio" className="text-sm font-medium underline underline-offset-4">
-              Back to all projects
-            </Link>
+            <Button variant="outline" render={<Link to="/studio" />}>
+              <ArrowLeftIcon />
+              All projects
+            </Button>
           </>
         ) : (
           <Spinner className="size-5 text-muted-foreground" />
@@ -133,6 +296,28 @@ function StudioRoomBody({ project }: { readonly project: EnvironmentProject }) {
   );
   const messages = useThreadMessages(threadRef);
   const working = activeShell?.latestTurn?.state === "running";
+  const vitals = useMemo(() => parseVitals(messages), [messages]);
+
+  const workspaceQuery = encodeURIComponent(project.workspaceRoot);
+  const artifacts =
+    usePolledJson(
+      `/api/carbon/artifacts?workspaceRoot=${workspaceQuery}`,
+      (payload) => parseFileEntries(payload, "artifacts"),
+      5_000,
+    ) ?? [];
+  const [uploadsRefreshKey, setUploadsRefreshKey] = useState(0);
+  const uploads =
+    usePolledJson(
+      `/api/carbon/uploads?workspaceRoot=${workspaceQuery}&r=${uploadsRefreshKey}`,
+      (payload) => parseFileEntries(payload, "uploads"),
+      7_000,
+    ) ?? [];
+  const workspaceEntries =
+    usePolledJson(
+      `/api/carbon/workspace?workspaceRoot=${workspaceQuery}`,
+      parseWorkspaceEntries,
+      15_000,
+    ) ?? [];
 
   const turnTarget: StudioTurnTarget = useMemo(
     () => ({
@@ -161,34 +346,374 @@ function StudioRoomBody({ project }: { readonly project: EnvironmentProject }) {
   };
 
   return (
-    <div className="fixed inset-0 z-40 flex flex-col bg-background text-foreground">
-      <header className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
-        <Link
-          to="/studio"
-          className="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ArrowLeftIcon className="size-4" />
+    <div className="fixed inset-0 z-50 flex flex-col bg-background text-foreground">
+      <HideWorkspaceChrome />
+      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border/60 px-3">
+        <Button variant="ghost-muted" size="sm" render={<Link to="/studio" />}>
+          <ArrowLeftIcon />
           All projects
-        </Link>
-        <span className="text-muted-foreground/50">/</span>
-        <h1 className="truncate text-sm font-semibold">{project.title}</h1>
+        </Button>
+        <span className="h-4 w-px shrink-0 bg-border/70" aria-hidden />
+        <div className="flex min-w-0 items-center gap-2">
+          <ProjectFavicon
+            environmentId={project.environmentId}
+            cwd={project.workspaceRoot}
+            faviconPath={project.faviconPath}
+            className="size-4"
+          />
+          <h1 className="truncate text-sm font-semibold">{project.title}</h1>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          {working ? (
+            <span className="flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground">
+              <Spinner className="size-3" />
+              Working on it…
+            </span>
+          ) : null}
+          {vitals?.deadline ? (
+            <span className="flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground">
+              <CalendarIcon className="size-3" />
+              Due {vitals.deadline}
+            </span>
+          ) : null}
+        </div>
       </header>
-      <div className="grid min-h-0 flex-1 grid-cols-[300px_minmax(0,1fr)_300px]">
-        <SkillShelf onRun={send} workspaceRoot={project.workspaceRoot} />
+      <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)_320px] xl:grid-cols-[320px_minmax(0,1fr)_360px]">
+        <aside className="flex min-h-0 flex-col border-r border-border/60">
+          <PaneHeader>Things I can do</PaneHeader>
+          <ScrollArea scrollFade className="min-h-0 flex-1">
+            <div className="flex flex-col gap-2.5 p-3">
+              <SkillLibrary onRun={send} workspaceRoot={project.workspaceRoot} />
+            </div>
+          </ScrollArea>
+        </aside>
         <Conversation
           messages={messages}
           working={working}
           sendError={sendError}
-          workspaceRoot={project.workspaceRoot}
           onSend={send}
+          markdownCwd={project.workspaceRoot}
+          threadRef={threadRef}
+          artifacts={artifacts}
         />
-        <ResultsPanel workspaceRoot={project.workspaceRoot} />
+        <aside className="flex min-h-0 flex-col border-l border-border/60">
+          <ScrollArea scrollFade className="min-h-0 flex-1">
+            <div className="flex flex-col">
+              <RailSection title="Overview">
+                <OverviewSection vitals={vitals} workspaceEntries={workspaceEntries} />
+              </RailSection>
+              <RailSection title="Files">
+                <FilesSection
+                  workspaceRoot={project.workspaceRoot}
+                  uploads={uploads}
+                  onUploaded={() => setUploadsRefreshKey((key) => key + 1)}
+                />
+              </RailSection>
+              <RailSection title="Results">
+                <ResultsSection artifacts={artifacts} />
+              </RailSection>
+            </div>
+          </ScrollArea>
+        </aside>
       </div>
     </div>
   );
 }
 
-function SkillShelf({
+function PaneHeader({ children }: { readonly children: ReactNode }) {
+  return (
+    <div className="flex h-10 shrink-0 items-center border-b border-border/40 px-4 text-[11px] font-medium tracking-[0.14em] text-muted-foreground uppercase">
+      {children}
+    </div>
+  );
+}
+
+function RailSection({
+  title,
+  children,
+}: {
+  readonly title: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <section className="border-b border-border/40 last:border-b-0">
+      <div className="sticky top-0 z-10 flex h-10 items-center bg-background px-4 text-[11px] font-medium tracking-[0.14em] text-muted-foreground uppercase">
+        {title}
+      </div>
+      <div className="flex flex-col gap-2.5 px-3 pb-4">{children}</div>
+    </section>
+  );
+}
+
+function EmptyHint({
+  icon: Icon,
+  children,
+}: {
+  readonly icon: ComponentType<{ className?: string }>;
+  readonly children: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-2 rounded-xl border border-border/40 bg-muted/20 px-4 py-6 text-center">
+      <Icon className="size-4 text-muted-foreground/70" />
+      <p className="text-xs leading-relaxed text-muted-foreground">{children}</p>
+    </div>
+  );
+}
+
+function OverviewSection({
+  vitals,
+  workspaceEntries,
+}: {
+  readonly vitals: ProjectVitals | null;
+  readonly workspaceEntries: ReadonlyArray<StudioWorkspaceEntry>;
+}) {
+  return (
+    <>
+      {vitals === null ? (
+        <EmptyHint icon={FileTextIcon}>
+          Project details show up here after the first message.
+        </EmptyHint>
+      ) : (
+        <Card className="gap-2.5 rounded-xl p-3.5">
+          {vitals.client !== null ? <VitalRow label="Client" value={vitals.client} /> : null}
+          {vitals.what !== null ? <VitalRow label="Making" value={vitals.what} /> : null}
+          {vitals.deadline !== null ? <VitalRow label="Due" value={vitals.deadline} /> : null}
+          {vitals.links.length > 0 ? (
+            <div className="flex items-start gap-2">
+              <span className="w-14 shrink-0 pt-0.5 text-xs text-muted-foreground">Links</span>
+              <span className="flex min-w-0 flex-wrap gap-1.5">
+                {vitals.links.map((link) => (
+                  <a
+                    key={link}
+                    href={link}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex max-w-full items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-xs text-foreground transition-colors hover:border-border hover:bg-accent/50"
+                  >
+                    <LinkIcon className="size-3 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{new URL(link).hostname}</span>
+                  </a>
+                ))}
+              </span>
+            </div>
+          ) : null}
+        </Card>
+      )}
+      {workspaceEntries.length > 0 ? (
+        <Card className="gap-1.5 rounded-xl p-3.5">
+          <p className="mb-1 text-xs text-muted-foreground">In the project folder</p>
+          {workspaceEntries.map((entry) => (
+            <div key={entry.name} className="flex items-center gap-2 text-sm">
+              {entry.kind === "folder" ? (
+                <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
+              ) : (
+                <FileIcon className="size-3.5 shrink-0 text-muted-foreground" />
+              )}
+              <span className="truncate">{entry.name}</span>
+            </div>
+          ))}
+        </Card>
+      ) : null}
+    </>
+  );
+}
+
+function VitalRow({ label, value }: { readonly label: string; readonly value: string }) {
+  return (
+    <div className="flex items-start gap-2">
+      <span className="w-14 shrink-0 pt-0.5 text-xs text-muted-foreground">{label}</span>
+      <span className="min-w-0 text-sm leading-snug">{value}</span>
+    </div>
+  );
+}
+
+function FilesSection({
+  workspaceRoot,
+  uploads,
+  onUploaded,
+}: {
+  readonly workspaceRoot: string;
+  readonly uploads: ReadonlyArray<StudioFileEntry>;
+  readonly onUploaded: () => void;
+}) {
+  const [dragOver, setDragOver] = useState(false);
+  const [uploadingCount, setUploadingCount] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  const uploadFiles = useCallback(
+    async (files: ReadonlyArray<File>) => {
+      if (files.length === 0) return;
+      setUploadingCount((count) => count + files.length);
+      setUploadError(null);
+      try {
+        for (const file of files) {
+          const response = await fetch(
+            `/api/carbon/upload?workspaceRoot=${encodeURIComponent(workspaceRoot)}&name=${encodeURIComponent(file.name)}`,
+            { method: "POST", body: file },
+          );
+          if (!response.ok) {
+            setUploadError(`Couldn't add ${file.name}.`);
+          }
+        }
+      } catch {
+        setUploadError("Upload didn't go through — try again.");
+      } finally {
+        setUploadingCount((count) => Math.max(0, count - files.length));
+        onUploaded();
+      }
+    },
+    [workspaceRoot, onUploaded],
+  );
+
+  return (
+    <>
+      <label
+        className={cn(
+          "flex cursor-pointer flex-col items-center gap-1 rounded-xl border border-dashed border-border bg-muted/20 px-4 py-5 text-center transition-colors hover:border-ring/60 hover:bg-muted/40",
+          dragOver && "border-ring bg-accent/40",
+        )}
+        onDragOver={(event) => {
+          event.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(event) => {
+          event.preventDefault();
+          setDragOver(false);
+          void uploadFiles([...event.dataTransfer.files]);
+        }}
+      >
+        <UploadCloudIcon className="size-5 text-muted-foreground" />
+        <span className="text-xs font-medium">Drop files here</span>
+        <span className="text-[11px] text-muted-foreground">or click to browse</span>
+        <input
+          type="file"
+          multiple
+          hidden
+          onChange={(event) => {
+            void uploadFiles([...(event.target.files ?? [])]);
+            event.target.value = "";
+          }}
+        />
+      </label>
+      {uploadingCount > 0 ? (
+        <div className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
+          <Spinner className="size-3" />
+          Adding {uploadingCount === 1 ? "file" : `${uploadingCount} files`}…
+        </div>
+      ) : null}
+      {uploadError !== null ? (
+        <p className="px-1 text-xs text-destructive-foreground">{uploadError}</p>
+      ) : null}
+      {uploads.length > 0 ? (
+        <Card className="gap-0 divide-y divide-border/50 rounded-xl p-0">
+          {uploads.map((upload) => {
+            const Icon = fileIconFor(upload.path);
+            return (
+              <div key={upload.path} className="flex items-center gap-2.5 px-3 py-2">
+                <Icon className="size-4 shrink-0 text-muted-foreground" />
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate text-sm">{upload.name}</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    {[
+                      upload.sizeBytes !== null ? formatBytes(upload.sizeBytes) : null,
+                      upload.modifiedAt !== null
+                        ? formatRelativeTimeLabel(upload.modifiedAt)
+                        : null,
+                    ]
+                      .filter((part) => part !== null)
+                      .join(" · ")}
+                  </span>
+                </span>
+              </div>
+            );
+          })}
+        </Card>
+      ) : null}
+    </>
+  );
+}
+
+function ResultsSection({ artifacts }: { readonly artifacts: ReadonlyArray<StudioFileEntry> }) {
+  if (artifacts.length === 0) {
+    return <EmptyHint icon={PackageOpenIcon}>Nothing yet — run a skill.</EmptyHint>;
+  }
+  return (
+    <>
+      {artifacts.map((artifact) => {
+        const Icon = fileIconFor(artifact.path);
+        const extension = fileExtension(artifact.path);
+        const isHtml = extension === "html" || extension === "htm";
+        const url = artifactFileUrl(artifact.path);
+        return (
+          <Card
+            key={artifact.path}
+            className="gap-2.5 rounded-xl p-3 transition-[box-shadow,border-color] duration-150 hover:border-border hover:shadow-sm"
+          >
+            {isHtml ? (
+              <div className="pointer-events-none h-24 overflow-hidden rounded-lg border border-border/60 bg-background">
+                <iframe
+                  src={url}
+                  sandbox=""
+                  tabIndex={-1}
+                  loading="lazy"
+                  title={`Preview of ${artifact.name}`}
+                  className="h-48 w-[200%] origin-top-left scale-50"
+                />
+              </div>
+            ) : null}
+            <div className="flex items-center gap-2.5">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-muted/40">
+                <Icon className="size-4 text-muted-foreground" />
+              </span>
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-sm font-medium">{artifact.name}</span>
+                {artifact.modifiedAt !== null ? (
+                  <span className="text-xs text-muted-foreground">
+                    {formatRelativeTimeLabel(artifact.modifiedAt)}
+                  </span>
+                ) : null}
+              </span>
+              <Button
+                size="xs"
+                variant="outline"
+                render={<a href={url} target="_blank" rel="noreferrer" />}
+              >
+                Open
+              </Button>
+            </div>
+          </Card>
+        );
+      })}
+    </>
+  );
+}
+
+function SkillIconTile({ skill }: { readonly skill: StudioSkill }) {
+  const [iconFailed, setIconFailed] = useState(false);
+  if (skill.hasIcon && !iconFailed) {
+    return (
+      <img
+        src={`/api/carbon/skills/${encodeURIComponent(skill.id)}/icon`}
+        alt=""
+        onError={() => setIconFailed(true)}
+        className="size-11 shrink-0 rounded-xl border border-border/60 object-cover"
+      />
+    );
+  }
+  return (
+    <span
+      className={cn(
+        "flex size-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-base font-semibold text-white",
+        monogramGradient(skill.id),
+      )}
+    >
+      {skill.name.charAt(0).toUpperCase()}
+    </span>
+  );
+}
+
+function SkillLibrary({
   onRun,
   workspaceRoot,
 }: {
@@ -241,128 +766,124 @@ function SkillShelf({
     }
   };
 
-  return (
-    <aside className="min-h-0 overflow-y-auto border-r border-border p-4">
-      <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        Things I can do
-      </h2>
-      {skills === null ? (
-        <div className="mt-6 flex justify-center">
-          <Spinner className="size-4 text-muted-foreground" />
-        </div>
-      ) : skills.length === 0 ? (
-        <p className="mt-4 text-sm text-muted-foreground">
-          Nothing on the shelf yet — check back soon.
-        </p>
-      ) : (
-        <ul className="mt-3 flex flex-col gap-2">
-          {skills.map((skill) => {
-            const expanded = expandedId === skill.id;
-            return (
-              <li
-                key={skill.id}
-                className="rounded-xl border border-border bg-card transition-colors"
-              >
-                <button
-                  type="button"
-                  className="flex w-full cursor-pointer items-start gap-3 p-3 text-left"
-                  onClick={() => setExpandedId(expanded ? null : skill.id)}
-                >
-                  {skill.hasIcon ? (
-                    <img
-                      src={`/api/carbon/skills/${encodeURIComponent(skill.id)}/icon`}
-                      alt=""
-                      className="mt-0.5 size-8 shrink-0 rounded-lg object-cover"
-                    />
-                  ) : (
-                    <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-secondary text-sm font-semibold text-secondary-foreground">
-                      {skill.name.charAt(0).toUpperCase()}
-                    </span>
-                  )}
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-medium">{skill.name}</span>
-                    {skill.oneLiner.length > 0 ? (
-                      <span className="mt-0.5 block text-xs text-muted-foreground">
-                        {skill.oneLiner}
-                      </span>
-                    ) : null}
-                    {!expanded && skill.youGiveMe.length > 0 ? (
-                      <span className="mt-1 block text-[11px] text-muted-foreground/80">
-                        You give me: {skill.youGiveMe.join(", ")}
-                      </span>
-                    ) : null}
-                  </span>
-                </button>
-                {expanded ? (
-                  <div className="flex flex-col gap-2 border-t border-border/70 p-3">
-                    {skill.youGiveMe.map((label) => (
-                      <label
-                        key={label}
-                        className="flex flex-col gap-1 text-xs font-medium text-muted-foreground"
-                      >
-                        {label}
-                        <Input
-                          size="sm"
-                          value={answers[`${skill.id}:${label}`] ?? ""}
-                          onChange={(event) =>
-                            setAnswers((existing) => ({
-                              ...existing,
-                              [`${skill.id}:${label}`]: event.target.value,
-                            }))
-                          }
-                          className="rounded-lg border border-input bg-popover text-foreground"
-                        />
-                      </label>
-                    ))}
-                    <Button
-                      size="sm"
-                      className="self-end"
-                      disabled={runningId !== null}
-                      onClick={() => void runSkill(skill)}
-                    >
-                      {runningId === skill.id ? <Spinner className="size-3.5" /> : null}
-                      Go
-                    </Button>
-                  </div>
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </aside>
-  );
-}
+  if (skills === null) {
+    return (
+      <div className="flex justify-center py-10">
+        <Spinner className="size-4 text-muted-foreground" />
+      </div>
+    );
+  }
+  if (skills.length === 0) {
+    return (
+      <EmptyHint icon={WandSparklesIcon}>Nothing on the shelf yet — check back soon.</EmptyHint>
+    );
+  }
 
-interface UploadStatus {
-  readonly id: string;
-  readonly name: string;
-  readonly state: "uploading" | "failed";
+  return (
+    <>
+      {skills.map((skill) => {
+        const expanded = expandedId === skill.id;
+        return (
+          <Card
+            key={skill.id}
+            className={cn(
+              "gap-0 overflow-hidden rounded-xl p-0 transition-[box-shadow,border-color] duration-150 hover:border-border hover:shadow-md",
+              expanded && "border-border shadow-md",
+            )}
+          >
+            <button
+              type="button"
+              className="flex w-full cursor-pointer items-start gap-3 p-3.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+              aria-expanded={expanded}
+              onClick={() => setExpandedId(expanded ? null : skill.id)}
+            >
+              <SkillIconTile skill={skill} />
+              <span className="flex min-w-0 flex-col gap-1">
+                <span className="truncate text-sm font-semibold">{skill.name}</span>
+                {skill.oneLiner.length > 0 ? (
+                  <span className="line-clamp-2 text-xs leading-snug text-muted-foreground">
+                    {skill.oneLiner}
+                  </span>
+                ) : null}
+                {!expanded && skill.youGiveMe.length > 0 ? (
+                  <span className="line-clamp-2 text-[11px] leading-snug text-muted-foreground/75">
+                    You give me: {skill.youGiveMe.join(" · ")}
+                  </span>
+                ) : null}
+              </span>
+            </button>
+            {expanded ? (
+              <form
+                className="flex flex-col gap-3 border-t border-border/60 bg-muted/32 p-3.5"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void runSkill(skill);
+                }}
+              >
+                {skill.youGiveMe.map((label) => (
+                  <Field key={label}>
+                    <FieldLabel className="text-xs sm:text-xs">{label}</FieldLabel>
+                    <Input
+                      size="sm"
+                      value={answers[`${skill.id}:${label}`] ?? ""}
+                      onChange={(event) =>
+                        setAnswers((existing) => ({
+                          ...existing,
+                          [`${skill.id}:${label}`]: event.target.value,
+                        }))
+                      }
+                    />
+                  </Field>
+                ))}
+                <Button type="submit" size="sm" disabled={runningId !== null}>
+                  {runningId === skill.id ? (
+                    <Spinner className="size-3.5" />
+                  ) : (
+                    <SparklesIcon className="size-3.5" />
+                  )}
+                  Go
+                </Button>
+              </form>
+            ) : null}
+          </Card>
+        );
+      })}
+    </>
+  );
 }
 
 function Conversation({
   messages,
   working,
   sendError,
-  workspaceRoot,
   onSend,
+  markdownCwd,
+  threadRef,
+  artifacts,
 }: {
-  readonly messages: ReadonlyArray<{
-    readonly id: string;
-    readonly role: "user" | "assistant" | "system";
-    readonly text: string;
-  }>;
+  readonly messages: ReadonlyArray<OrchestrationMessage>;
   readonly working: boolean;
   readonly sendError: string | null;
-  readonly workspaceRoot: string;
   readonly onSend: (text: string) => Promise<boolean>;
+  readonly markdownCwd: string;
+  readonly threadRef: ScopedThreadRef | null;
+  readonly artifacts: ReadonlyArray<StudioFileEntry>;
 }) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
-  const [uploads, setUploads] = useState<ReadonlyArray<UploadStatus>>([]);
-  const [dropActive, setDropActive] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const scrollRootRef = useRef<HTMLDivElement>(null);
+  const openedAtRef = useRef(new Date().toISOString());
+  const [dismissedResultPath, setDismissedResultPath] = useState<string | null>(null);
+
+  const freshResult = useMemo(() => {
+    const candidates = artifacts
+      .filter(
+        (artifact) => artifact.modifiedAt !== null && artifact.modifiedAt > openedAtRef.current,
+      )
+      .sort((a, b) => (b.modifiedAt ?? "").localeCompare(a.modifiedAt ?? ""));
+    const newest = candidates[0] ?? null;
+    return newest !== null && newest.path !== dismissedResultPath ? newest : null;
+  }, [artifacts, dismissedResultPath]);
 
   const visibleMessages = useMemo(
     () =>
@@ -374,12 +895,27 @@ function Conversation({
     [messages],
   );
 
+  const getViewport = (): HTMLElement | null => {
+    const viewport = scrollRootRef.current?.querySelector('[data-slot="scroll-area-viewport"]');
+    return viewport instanceof HTMLElement ? viewport : null;
+  };
+
+  const hasOpenedAtBottomRef = useRef(false);
   useEffect(() => {
-    const node = scrollRef.current;
-    if (node !== null) {
-      node.scrollTop = node.scrollHeight;
+    const viewport = getViewport();
+    if (viewport === null || visibleMessages.length === 0) return;
+    if (!hasOpenedAtBottomRef.current) {
+      // Opening the room lands on the latest exchange, not the top of history.
+      hasOpenedAtBottomRef.current = true;
+      viewport.scrollTo({ top: viewport.scrollHeight });
+      return;
     }
-  }, [visibleMessages, working, uploads]);
+    const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+    // Follow the conversation unless the reader has scrolled up into history.
+    if (distanceFromBottom < 240) {
+      viewport.scrollTo({ top: viewport.scrollHeight });
+    }
+  }, [visibleMessages, working]);
 
   const submit = async () => {
     const text = draft.trim();
@@ -387,208 +923,151 @@ function Conversation({
     setSending(true);
     try {
       const sent = await onSend(text);
-      if (sent) setDraft("");
+      if (sent) {
+        setDraft("");
+        // The sender's own message always comes into view.
+        requestAnimationFrame(() => {
+          const viewport = getViewport();
+          if (viewport !== null) viewport.scrollTo({ top: viewport.scrollHeight });
+        });
+      }
     } finally {
       setSending(false);
     }
   };
 
-  const uploadFiles = async (files: FileList | ReadonlyArray<File>) => {
-    for (const file of Array.from(files)) {
-      const id = `upload-${++uploadSequence}`;
-      setUploads((existing) => [...existing, { id, name: file.name, state: "uploading" }]);
-      try {
-        const response = await fetch(
-          `/api/carbon/upload?workspaceRoot=${encodeURIComponent(workspaceRoot)}&name=${encodeURIComponent(file.name)}`,
-          { method: "POST", body: file },
-        );
-        if (!response.ok) throw new Error("upload failed");
-        const uploaded: unknown = await response.json();
-        if (
-          typeof uploaded !== "object" ||
-          uploaded === null ||
-          typeof (uploaded as { name?: unknown }).name !== "string" ||
-          typeof (uploaded as { path?: unknown }).path !== "string"
-        ) {
-          throw new Error("invalid upload response");
-        }
-        const { name, path } = uploaded as { readonly name: string; readonly path: string };
-        if (
-          !(await onSend(
-            `I've added the file ${name} — it's saved at ${path}. Use it for this project.`,
-          ))
-        ) {
-          throw new Error("message failed");
-        }
-        setUploads((existing) => existing.filter((upload) => upload.id !== id));
-      } catch {
-        setUploads((existing) =>
-          existing.map((upload) => (upload.id === id ? { ...upload, state: "failed" } : upload)),
-        );
-      }
-    }
-  };
-
   return (
-    <section
-      className={cn("relative flex min-h-0 flex-col", dropActive && "bg-accent/40")}
-      onDragOver={(event) => {
-        event.preventDefault();
-        setDropActive(true);
-      }}
-      onDragLeave={(event) => {
-        if (event.currentTarget === event.target) setDropActive(false);
-      }}
-      onDrop={(event) => {
-        event.preventDefault();
-        setDropActive(false);
-        void uploadFiles(event.dataTransfer.files);
-      }}
-    >
-      {dropActive ? (
-        <div className="pointer-events-none absolute inset-x-0 top-4 z-10 text-center text-sm font-medium text-foreground">
-          Drop files to share them
-        </div>
-      ) : null}
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-        {visibleMessages.length === 0 && !working && uploads.length === 0 ? (
-          <p className="mt-8 text-center text-sm text-muted-foreground">
-            Say hello, or run something from the shelf on the left.
-          </p>
+    <section className="flex min-h-0 flex-col">
+      <ScrollArea ref={scrollRootRef} scrollFade className="min-h-0 flex-1">
+        {visibleMessages.length === 0 && !working ? (
+          <div className="flex h-full items-center justify-center px-6">
+            <p className="text-placeholder text-sm">
+              Say hello — or run something from the shelf on the left.
+            </p>
+          </div>
         ) : (
-          <div className="mx-auto flex max-w-2xl flex-col gap-4">
-            {visibleMessages.map((message) => (
-              <div
-                key={message.id}
-                className={cn(
-                  "max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap",
-                  message.role === "user"
-                    ? "self-end rounded-br-md bg-primary text-primary-foreground"
-                    : "self-start rounded-bl-md bg-secondary text-secondary-foreground",
-                )}
-              >
-                {message.text}
-              </div>
-            ))}
-            {uploads.map((upload) =>
-              upload.state === "uploading" ? (
-                <div
-                  key={upload.id}
-                  className="flex items-center gap-2 self-start px-1 text-sm text-muted-foreground"
-                >
-                  <Spinner className="size-3.5" />
-                  Uploading {upload.name}…
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-5 py-6">
+            {visibleMessages.map((message) =>
+              message.role === "user" ? (
+                <div key={message.id} className="group flex flex-col items-end gap-1">
+                  <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
+                    <div className="text-sm leading-relaxed whitespace-pre-wrap">
+                      {message.text}
+                    </div>
+                  </div>
+                  <div className="flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+                    <span className="text-muted-foreground">
+                      {formatRelativeTimeLabel(message.createdAt)}
+                    </span>
+                  </div>
                 </div>
               ) : (
-                <p key={upload.id} className="self-start px-1 text-sm text-destructive-foreground">
-                  Upload failed — try again.
-                </p>
+                <div key={message.id} className="group/assistant relative min-w-0 px-1 py-0.5">
+                  <ChatMarkdown
+                    text={message.text}
+                    cwd={markdownCwd}
+                    threadRef={threadRef ?? undefined}
+                    isStreaming={message.streaming}
+                  />
+                  {!message.streaming ? (
+                    <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums opacity-0 transition-opacity duration-200 group-hover/assistant:opacity-100">
+                      <span className="text-muted-foreground">
+                        {formatRelativeTimeLabel(message.updatedAt)}
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
               ),
             )}
             {working ? (
-              <div className="flex items-center gap-2 self-start px-1 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2 px-1 text-sm leading-relaxed text-muted-foreground tabular-nums">
                 <Spinner className="size-3.5" />
                 Working on it…
               </div>
             ) : null}
           </div>
         )}
-      </div>
-      <div className="shrink-0 border-t border-border px-6 py-4">
+      </ScrollArea>
+      <div className="shrink-0 px-4 pt-1 pb-4">
+        {freshResult !== null ? (
+          <div className="mx-auto mb-2 flex w-full max-w-3xl items-center gap-2.5 rounded-xl border border-border/70 bg-card px-3 py-2 shadow-xs/5">
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border/60 bg-muted/40">
+              <AppWindowIcon className="size-3.5 text-muted-foreground" />
+            </span>
+            <span className="min-w-0 flex-1 truncate text-sm">
+              New result: <span className="font-medium">{freshResult.name}</span>
+            </span>
+            <Button
+              size="xs"
+              variant="outline"
+              render={
+                <a href={artifactFileUrl(freshResult.path)} target="_blank" rel="noreferrer" />
+              }
+            >
+              Open
+            </Button>
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              aria-label="Dismiss"
+              onClick={() => setDismissedResultPath(freshResult.path)}
+            >
+              <XIcon />
+            </Button>
+          </div>
+        ) : null}
         {sendError !== null ? (
-          <p className="mx-auto mb-2 max-w-2xl text-xs text-destructive-foreground">
+          <p className="mx-auto mb-2 w-full max-w-3xl px-1 text-xs text-destructive-foreground">
             That didn't go through: {sendError}
           </p>
         ) : null}
-        <form
-          className="mx-auto flex max-w-2xl items-center gap-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submit();
-          }}
-        >
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="sr-only"
-            multiple
-            onChange={(event) => {
-              if (event.target.files !== null) void uploadFiles(event.target.files);
-              event.target.value = "";
-            }}
-          />
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            aria-label="Attach files"
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <PaperclipIcon className="size-4" />
-          </Button>
-          <Input
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder="Type a message…"
-            className="rounded-xl border border-input bg-popover"
-            disabled={sending}
-          />
-          <Button type="submit" size="icon" disabled={sending || draft.trim().length === 0}>
-            {sending ? <Spinner className="size-4" /> : <SendIcon />}
-          </Button>
-        </form>
+        <div className="chat-composer-glass-shell relative mx-auto w-full max-w-3xl">
+          <div className="chat-composer-glass-host relative z-10 w-full rounded-[22px]">
+            <form
+              className="relative z-10 flex items-end gap-3 py-3 ps-4.5 pe-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submit();
+              }}
+            >
+              <textarea
+                rows={1}
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    void submit();
+                  }
+                }}
+                placeholder="Ask anything…"
+                disabled={sending}
+                className="field-sizing-content max-h-40 min-w-0 flex-1 resize-none self-center bg-transparent py-1 text-[15px] leading-6 outline-none placeholder:text-placeholder sm:text-sm"
+              />
+              <button
+                type="submit"
+                aria-label="Send"
+                disabled={sending || draft.trim().length === 0}
+                className="mb-0.5 flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-message-action text-message-action-foreground transition-colors hover:bg-message-action-hover disabled:cursor-default disabled:opacity-30"
+              >
+                {sending ? (
+                  <Spinner className="size-4" />
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path
+                      d="M8 3L8 13M8 3L4 7M8 3L12 7"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                )}
+              </button>
+            </form>
+          </div>
+        </div>
       </div>
     </section>
-  );
-}
-
-function ResultsPanel({ workspaceRoot }: { readonly workspaceRoot: string }) {
-  const [artifacts, setArtifacts] = useState<ReadonlyArray<StudioArtifact>>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const response = await fetch(
-          `/api/carbon/artifacts?workspaceRoot=${encodeURIComponent(workspaceRoot)}`,
-        );
-        if (!response.ok) return;
-        const parsed = parseArtifacts(await response.json());
-        if (!cancelled) setArtifacts(parsed);
-      } catch {
-        // Endpoint not available yet — the empty state stands in.
-      }
-    };
-    void load();
-    const timer = setInterval(() => void load(), 5_000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [workspaceRoot]);
-
-  return (
-    <aside className="min-h-0 overflow-y-auto border-l border-border p-4">
-      <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Results</h2>
-      {artifacts.length === 0 ? (
-        <p className="mt-4 text-sm text-muted-foreground">Nothing yet — run a skill.</p>
-      ) : (
-        <ul className="mt-3 flex flex-col gap-1.5">
-          {artifacts.map((artifact) => (
-            <li key={artifact.path}>
-              <a
-                href={`/api/carbon/artifacts/file?path=${encodeURIComponent(artifact.path)}`}
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm transition-colors hover:bg-accent/50"
-              >
-                <FileIcon className="size-4 shrink-0 text-muted-foreground" />
-                <span className="truncate">{artifact.name}</span>
-              </a>
-            </li>
-          ))}
-        </ul>
-      )}
-    </aside>
   );
 }
