@@ -1,5 +1,5 @@
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { LinkIcon, PlusIcon, RotateCcwIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -133,6 +133,12 @@ function NoProjectsHero() {
 }
 
 export const Route = createFileRoute("/_chat/")({
+  // Carbon Studio's front door is the studio workspace. The developer
+  // surface stays fully reachable at its direct URLs (threads, grid,
+  // settings) — only the bare index redirects.
+  beforeLoad: () => {
+    throw redirect({ to: "/studio" });
+  },
   component: ChatIndexRouteView,
 });
 
