@@ -1,0 +1,17 @@
+{
+  "id": "review-round",
+  "name": "Run a review round",
+  "icon": "icon.png",
+  "oneLiner": "Client comments in \u2014 a check page out, with the measurements and an honest \"needs your check\".",
+  "youGiveMe": [
+    "The client comments (paste them, any language)",
+    "Which version this is (v3, v4, ...)",
+    "The video file, if you have it \u2014 drag it in (optional)"
+  ],
+  "scripts": [],
+  "artifact": {
+    "template": "",
+    "kind": "page",
+    "output": "artifacts/round-v<N>/"
+  }
+}

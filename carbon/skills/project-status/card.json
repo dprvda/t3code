@@ -1,0 +1,13 @@
+{
+  "id": "project-status",
+  "name": "Where does this project stand?",
+  "icon": "icon.png",
+  "oneLiner": "Reads the studio ledger: what is open, what came back, what we promised.",
+  "youGiveMe": ["Nothing \u2014 the project name from this room is enough"],
+  "scripts": [],
+  "artifact": {
+    "template": "",
+    "kind": "document",
+    "output": ""
+  }
+}

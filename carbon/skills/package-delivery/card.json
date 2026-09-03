@@ -1,0 +1,17 @@
+{
+  "id": "package-delivery",
+  "name": "Check the master before delivery",
+  "icon": "icon.png",
+  "oneLiner": "Refuses a broken master \u2014 silent audio, black frames, clipping, bad loop \u2014 and signs off the rest.",
+  "youGiveMe": [
+    "The master file \u2014 drag it in",
+    "Does it need audio? Does it loop?",
+    "Which aspect ratios you are delivering (9:16, 1:1, ...)"
+  ],
+  "scripts": [],
+  "artifact": {
+    "template": "",
+    "kind": "file",
+    "output": "artifacts/delivery-manifest.json"
+  }
+}

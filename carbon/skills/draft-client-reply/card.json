@@ -1,0 +1,17 @@
+{
+  "id": "draft-client-reply",
+  "name": "Draft the reply to the client",
+  "icon": "icon.png",
+  "oneLiner": "Writes the reply from what the round actually found. Never sends it.",
+  "youGiveMe": [
+    "The tone or intent in a few words (\"bien re\u00e7u, v5 Friday\")",
+    "English or French",
+    "Which round to base it on (defaults to the latest)"
+  ],
+  "scripts": [],
+  "artifact": {
+    "template": "",
+    "kind": "document",
+    "output": "artifacts/reply-<lang>.txt"
+  }
+}
