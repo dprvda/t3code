@@ -137,7 +137,7 @@ describe("carbon HTTP helpers", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("lists non-recursive workspace artifacts with modification timestamps", () =>
+  it.effect("lists flat and nested workspace artifacts with modification timestamps", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -146,16 +146,70 @@ describe("carbon HTTP helpers", () => {
       });
       const artifactsRoot = path.join(workspaceRoot, "artifacts");
       const artifactPath = path.join(artifactsRoot, "check-page.html");
-      yield* fileSystem.makeDirectory(path.join(artifactsRoot, "nested"), { recursive: true });
+      const nestedArtifactPath = path.join(artifactsRoot, "round-v4", "check-page.html");
+      yield* fileSystem.makeDirectory(path.dirname(nestedArtifactPath), { recursive: true });
       yield* fileSystem.writeFileString(artifactPath, "<h1>Check page</h1>");
+      yield* fileSystem.writeFileString(nestedArtifactPath, "<h1>Round v4</h1>");
 
       const artifacts = yield* listCarbonArtifacts(workspaceRoot);
-      expect(artifacts).toHaveLength(1);
+      expect(artifacts).toHaveLength(2);
       expect(artifacts[0]).toMatchObject({
         name: "check-page.html",
         path: artifactPath,
       });
-      expect(Number.isNaN(Date.parse(artifacts[0]!.modifiedAt))).toBe(false);
+      expect(artifacts[1]).toMatchObject({
+        name: "round-v4/check-page.html",
+        path: nestedArtifactPath,
+      });
+      expect(artifacts.every((artifact) => !Number.isNaN(Date.parse(artifact.modifiedAt)))).toBe(
+        true,
+      );
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("does not follow artifact file or directory symlinks", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "carbon-http-artifacts-",
+      });
+      const outsideRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "carbon-http-outside-",
+      });
+      const artifactsRoot = path.join(workspaceRoot, "artifacts");
+      const insidePath = path.join(artifactsRoot, "inside.html");
+      const outsidePath = path.join(outsideRoot, "outside.html");
+      const outsideDirectory = path.join(outsideRoot, "round-v9");
+      yield* fileSystem.makeDirectory(artifactsRoot, { recursive: true });
+      yield* fileSystem.makeDirectory(outsideDirectory, { recursive: true });
+      yield* fileSystem.writeFileString(insidePath, "inside");
+      yield* fileSystem.writeFileString(outsidePath, "outside");
+      yield* fileSystem.writeFileString(path.join(outsideDirectory, "round.json"), "outside");
+      yield* fileSystem.symlink(insidePath, path.join(artifactsRoot, "linked-inside.html"));
+      yield* fileSystem.symlink(outsidePath, path.join(artifactsRoot, "linked-outside.html"));
+      yield* fileSystem.symlink(outsideDirectory, path.join(artifactsRoot, "linked-round"));
+
+      expect(yield* listCarbonArtifacts(workspaceRoot)).toEqual([
+        expect.objectContaining({ name: "inside.html", path: insidePath }),
+      ]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects an artifact root that is itself a symlink", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "carbon-http-workspace-",
+      });
+      const outsideRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "carbon-http-outside-",
+      });
+      yield* fileSystem.writeFileString(path.join(outsideRoot, "outside.html"), "outside");
+      yield* fileSystem.symlink(outsideRoot, path.join(workspaceRoot, "artifacts"));
+
+      expect(yield* listCarbonArtifacts(workspaceRoot)).toEqual([]);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 

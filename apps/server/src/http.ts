@@ -189,24 +189,61 @@ export const listCarbonArtifacts = Effect.fn("http.listCarbonArtifacts")(functio
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const artifactsRoot = path.join(workspaceRoot, "artifacts");
-  const names = yield* fileSystem.readDirectory(artifactsRoot).pipe(Effect.orElseSucceed(() => []));
-  const artifacts: Array<CarbonArtifact> = [];
+  const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
+  const resolvedArtifactsRoot = path.resolve(resolvedWorkspaceRoot, "artifacts");
+  const [canonicalWorkspaceRoot, canonicalArtifactsRoot] = yield* Effect.all([
+    fileSystem.realPath(resolvedWorkspaceRoot).pipe(Effect.option),
+    fileSystem.realPath(resolvedArtifactsRoot).pipe(Effect.option),
+  ]);
+  if (Option.isNone(canonicalWorkspaceRoot) || Option.isNone(canonicalArtifactsRoot)) return [];
 
-  for (const name of names.sort()) {
-    const filePath = path.resolve(artifactsRoot, name);
-    const info = yield* fileSystem.stat(filePath).pipe(Effect.option);
-    if (Option.isNone(info) || info.value.type !== "File" || Option.isNone(info.value.mtime)) {
-      continue;
+  // `artifacts` is a boundary, not a portal to another directory. Resolve the
+  // workspace separately so a workspace root that is itself a symlink still
+  // works, while an `artifacts` symlink is rejected.
+  const artifactsRoot = path.resolve(canonicalWorkspaceRoot.value, "artifacts");
+  if (canonicalArtifactsRoot.value !== artifactsRoot) return [];
+
+  const artifacts: Array<CarbonArtifact> = [];
+  const pendingDirectories = [artifactsRoot];
+
+  while (pendingDirectories.length > 0) {
+    const directory = pendingDirectories.pop()!;
+    const names = yield* fileSystem.readDirectory(directory).pipe(Effect.orElseSucceed(() => []));
+
+    for (const name of names.sort()) {
+      const lexicalPath = path.resolve(directory, name);
+      const canonicalPath = yield* fileSystem.realPath(lexicalPath).pipe(Effect.option);
+      if (Option.isNone(canonicalPath)) continue;
+
+      const relativePath = path.relative(artifactsRoot, canonicalPath.value);
+      const isWithinArtifacts =
+        relativePath !== "" &&
+        relativePath !== ".." &&
+        !relativePath.startsWith(`..${path.sep}`) &&
+        !path.isAbsolute(relativePath);
+      // A different canonical path means this entry is a symlink (or crosses
+      // another filesystem alias). Do not follow it, even when it points back
+      // inside the artifact tree: discovery should reflect files the skill
+      // actually wrote there, not a surprising second namespace.
+      if (!isWithinArtifacts || canonicalPath.value !== lexicalPath) continue;
+
+      const info = yield* fileSystem.stat(canonicalPath.value).pipe(Effect.option);
+      if (Option.isNone(info)) continue;
+      if (info.value.type === "Directory") {
+        pendingDirectories.push(canonicalPath.value);
+        continue;
+      }
+      if (info.value.type !== "File" || Option.isNone(info.value.mtime)) continue;
+
+      artifacts.push({
+        name: relativePath.split(path.sep).join("/"),
+        path: canonicalPath.value,
+        modifiedAt: info.value.mtime.value.toISOString(),
+      });
     }
-    artifacts.push({
-      name,
-      path: filePath,
-      modifiedAt: info.value.mtime.value.toISOString(),
-    });
   }
 
-  return artifacts;
+  return artifacts.sort((a, b) => a.name.localeCompare(b.name));
 });
 
 export interface CarbonUpload {
