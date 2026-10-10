@@ -4746,13 +4746,25 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           taskIds: delivery.taskIds,
         };
       }
-      // Route durable mailbox deliveries under the thread lock, using the live
-      // session's capabilities. Never interrupt/restart a turn for a notification.
+      // Coordination must reach the work in progress, even when a sending agent
+      // chooses queue. Resolve this under the thread lock; never interrupt tools
+      // or restart a turn just to deliver an automatic update.
+      const agentCoordination =
+        command.createdBy === "agent" &&
+        command.creationSource === "mcp" &&
+        command.senderThreadId !== undefined &&
+        command.senderThreadId !== command.threadId &&
+        (command.dispatchMode.type === "start_immediately" ||
+          command.dispatchMode.type === "queue_after_active") &&
+        !isNativeMaintenanceCommand(command) &&
+        !isGoalCommand(command);
       if (
-        delegatedCompletion !== undefined &&
-        delegatedCompletion.taskIds.every(
-          (id) => projection.subagents.find((task) => task.id === id)?.completionWake === "always",
-        )
+        agentCoordination ||
+        (delegatedCompletion !== undefined &&
+          delegatedCompletion.taskIds.every(
+            (id) =>
+              projection.subagents.find((task) => task.id === id)?.completionWake === "always",
+          ))
       ) {
         const active = projection.runs.find((run) => run.status === "running");
         const providerThread = projection.providerThreads.find(
