@@ -610,7 +610,16 @@ const make = Effect.gen(function* () {
           type: input.mode === "steer" ? "steer_active" : "restart_active",
           targetRunId: steerableRun.id,
         };
-      } else if (input.mode === "auto" && steerableRun !== undefined) {
+      } else if (
+        input.mode === "auto" &&
+        steerableRun !== undefined &&
+        !(
+          input.createdBy === "agent" &&
+          input.creationSource === "mcp" &&
+          input.senderThreadId !== undefined &&
+          input.senderThreadId !== input.threadId
+        )
+      ) {
         dispatchMode = { type: "steer_active", targetRunId: steerableRun.id };
       } else {
         dispatchMode = {

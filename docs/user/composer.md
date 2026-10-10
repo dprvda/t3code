@@ -58,6 +58,12 @@ are saved on the server and can be edited, reordered, or removed above the compo
 `Cmd+Enter` on macOS or `Ctrl+Enter` on Windows and Linux uses the opposite action:
 it steers when your default is Queue and queues when your default is Steer.
 
+Messages sent between T3 agents go into the running turn when the provider supports
+steering without interrupting tools, even if the sending agent requests a queue.
+If the turn is still starting or cannot accept that update, the message waits for
+a later turn. This does not change the follow-up behavior you choose for your own
+messages.
+
 Use `Cmd+Shift+Enter` on macOS or `Ctrl+Shift+Enter` on Windows and Linux to send
 the oldest queued message as a steer. This leaves the current draft intact and
 requires an active turn that supports steering. Change
